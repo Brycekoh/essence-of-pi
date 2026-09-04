@@ -98,11 +98,6 @@ Decisions made in milestone 1 that the later milestones depend on:
   `tests/pdf_fixture.py` so the suite needs no binary fixtures.
 
 ## Credit
-
-Inspired by [clarifai](https://github.com/) *(← replace with the original repo
-URL)*, which demonstrated the paper→Manim pipeline. This is an independent
-reimplementation written from scratch to learn the stack; no code was copied,
-and the architecture diverges deliberately (see [LEARNING.md](LEARNING.md)).
 Not affiliated with that project, with 3blue1brown, or with Grant Sanderson.
 
 Manim is a community-maintained project; "3blue1brown-style" describes the
