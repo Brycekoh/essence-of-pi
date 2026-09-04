@@ -27,16 +27,30 @@ PDF upload  →  validation  →  pdfplumber text extraction  →  JSON API
 
 ## Run it
 
+**Windows (PowerShell).** `&&` is not a valid statement separator in Windows
+PowerShell 5.1, and activating a venv can trip the execution policy -- so call
+the venv's executables directly:
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\uvicorn.exe app.main:app --reload
+```
+
+**macOS / Linux:**
+
 ```bash
 cd backend
-python -m venv .venv && .venv/Scripts/activate   # macOS/Linux: source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 uvicorn app.main:app --reload
 ```
 
 Interactive API docs: <http://localhost:8000/docs>
 
-Tests:
+Tests -- `.\.venv\Scripts\pytest.exe` on Windows, `pytest` once activated
+elsewhere:
 
 ```bash
 cd backend && pytest
