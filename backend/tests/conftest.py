@@ -1,8 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.concepts import provide_llm
 from app.config import Settings, get_settings
 from app.main import app
+from app.services.llm import StubLLM
 from app.services.store import PaperStore, get_store
 
 from .pdf_fixture import make_pdf
@@ -15,15 +17,23 @@ def settings(tmp_path) -> Settings:
 
 
 @pytest.fixture
-def client(settings):
-    """A TestClient with storage pointed at the temp directory.
+def stub_llm() -> StubLLM:
+    """A scripted LLM. Queue responses on it before hitting an endpoint."""
+    return StubLLM()
+
+
+@pytest.fixture
+def client(settings, stub_llm):
+    """A TestClient with storage and the LLM pointed at test doubles.
 
     Overriding dependencies instead of monkeypatching globals is what keeps
-    tests isolated from each other -- each one gets an empty store.
+    tests isolated from each other -- each one gets an empty store and a fresh
+    stub, and no test can reach the network by accident.
     """
     store = PaperStore(settings.upload_dir)
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_store] = lambda: store
+    app.dependency_overrides[provide_llm] = lambda: stub_llm
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

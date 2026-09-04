@@ -76,7 +76,7 @@ async def upload_paper(
 
 @router.get("", response_model=list[PaperSummary])
 async def list_papers(store: PaperStore = Depends(get_store)) -> list[PaperSummary]:
-    return [_summary(p) for p in store.list()]
+    return [_summary(p) for p in store.list_papers()]
 
 
 @router.get("/{paper_id}", response_model=Paper)

@@ -5,14 +5,14 @@ Research papers, distilled into 3blue1brown-style explainers.
 Upload a paper, get back the handful of ideas that actually matter, and watch
 each one become a short animated video.
 
-> **Status: milestone 1 of 8.** The PDF ingestion layer works and is tested.
-> Nothing generates video yet. This is a learning build, in public, one
-> milestone per commit — see [LEARNING.md](LEARNING.md) for the running log.
+> **Status: milestone 2 of 8.** Papers go in, concepts come out. Nothing
+> generates video yet. This is a learning build, in public, one milestone per
+> commit — see [LEARNING.md](LEARNING.md) for the running log.
 
 ## What works today
 
 ```
-PDF upload  →  validation  →  pdfplumber text extraction  →  JSON API
+PDF upload → validation → pdfplumber extraction → LLM concept extraction → JSON API
 ```
 
 | Method | Route | Does |
@@ -23,7 +23,14 @@ PDF upload  →  validation  →  pdfplumber text extraction  →  JSON API
 | `GET` | `/api/papers/{id}/text` | Extracted text, per page (`?page=2` for one) |
 | `GET` | `/api/papers/{id}/pdf` | The original file back |
 | `DELETE` | `/api/papers/{id}` | Remove the paper and its file |
+| `POST` | `/api/papers/{id}/concepts` | Extract concepts with an LLM (replaces any previous set) |
+| `GET` | `/api/papers/{id}/concepts` | Concepts extracted so far |
+| `GET` | `/api/papers/{id}/concepts/{cid}` | One concept |
 | `GET` | `/health` | Liveness check |
+
+The concept endpoints need `GEMINI_API_KEY` in `backend/.env` (a free key comes
+from [AI Studio](https://aistudio.google.com/apikey)). Without one the app still
+boots and serves papers; the concept routes return `503` explaining what to set.
 
 ## Run it
 
@@ -65,7 +72,7 @@ docker compose up --build
 ## Roadmap
 
 - [x] **1 — Ingestion.** Upload, validate, extract text. No AI.
-- [ ] **2 — Concepts.** An LLM pulls the core ideas out of the paper, using
+- [x] **2 — Concepts.** An LLM pulls the core ideas out of the paper, using
       structured output rather than parsing prose.
 - [ ] **3 — First render.** A hand-written Manim scene, rendered by the backend
       and served as an mp4.
@@ -96,6 +103,18 @@ Decisions made in milestone 1 that the later milestones depend on:
   an empty string, so page numbers always match the source document.
 - **Tests exist from commit one**, including a hand-rolled PDF writer in
   `tests/pdf_fixture.py` so the suite needs no binary fixtures.
+- **The model is constrained, not asked nicely.** `response_schema` makes the
+  SDK decode straight into a pydantic model, so there is no "reply in JSON"
+  instruction anywhere, no markdown fence to strip, and no regex to recover
+  from a chatty answer.
+- **A schema guarantees shape, not sense.** The model can still cite page 99 of
+  a 12-page paper or list a concept as its own prerequisite, so
+  `services/concepts.py` validates meaning after the SDK has validated form.
+- **The LLM sits behind one method.** `LLMClient.structured(prompt, schema)` is
+  the entire provider interface; prompts live with the feature that owns them.
+  Swapping providers is a new module and one branch in `llm/__init__.py`.
+- **Tests never touch the network.** `StubLLM` is scripted per test and records
+  what was asked, so prompt construction is asserted directly.
 
 ## Note
 

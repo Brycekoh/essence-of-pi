@@ -24,6 +24,18 @@ class Settings(BaseSettings):
     # Comma-separated in the env, a list here.
     allowed_origins: str = "http://localhost:3000"
 
+    # --- LLM (milestone 2) ---
+    # Absent by default, so the app still boots without a key; the concept
+    # endpoints return 503 with instructions instead of crashing at startup.
+    gemini_api_key: str | None = None
+    llm_model: str = "gemini-2.0-flash"
+
+    # How many concepts to ask for per paper.
+    max_concepts: int = 6
+
+    # How much of the paper to send. See services/concepts.py for the reasoning.
+    max_chars_to_model: int = 60_000
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]

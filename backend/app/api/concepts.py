@@ -1,0 +1,103 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+
+from ..config import Settings, get_settings
+from ..models import Concept
+from ..services.concepts import extract_concepts
+from ..services.llm import LLMError, LLMNotConfigured, build_llm
+from ..services.llm.base import LLMClient
+from ..services.store import (
+    ConceptNotFoundError,
+    PaperNotFoundError,
+    PaperStore,
+    get_store,
+)
+
+router = APIRouter(prefix="/papers/{paper_id}/concepts", tags=["concepts"])
+
+
+class ExtractionResult(BaseModel):
+    paper_id: str
+    concepts: list[Concept]
+    truncated: bool  # true if the paper was longer than the model budget
+    model: str
+
+
+def provide_llm(settings: Settings = Depends(get_settings)) -> LLMClient:
+    """The LLM dependency, and the place a missing key becomes a clean 503.
+
+    Letting `build_llm` raise inside dependency resolution would surface as an
+    opaque 500. Tests override this function to inject a stub.
+    """
+    try:
+        return build_llm(settings.gemini_api_key, settings.llm_model)
+    except LLMNotConfigured as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+
+
+@router.post("", response_model=ExtractionResult, status_code=status.HTTP_201_CREATED)
+async def create_concepts(
+    paper_id: str,
+    settings: Settings = Depends(get_settings),
+    store: PaperStore = Depends(get_store),
+    llm: LLMClient = Depends(provide_llm),
+) -> ExtractionResult:
+    """Extract concepts from an already-uploaded paper.
+
+    Idempotent in effect, not in cost: calling it again re-runs the model and
+    replaces the previous set.
+    """
+    try:
+        paper = store.get(paper_id)
+        pages = store.pages(paper_id)
+    except PaperNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such paper.")
+
+    try:
+        concepts, truncated = await extract_concepts(
+            llm,
+            paper,
+            pages,
+            max_concepts=settings.max_concepts,
+            char_budget=settings.max_chars_to_model,
+        )
+    except LLMError as exc:
+        # 502: we are the client of an upstream service and it let us down.
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    if not concepts:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "No concepts could be extracted -- the PDF may have no readable text.",
+        )
+
+    store.save_concepts(paper_id, concepts)
+    return ExtractionResult(
+        paper_id=paper_id,
+        concepts=concepts,
+        truncated=truncated,
+        model=llm.model,
+    )
+
+
+@router.get("", response_model=list[Concept])
+async def list_concepts(
+    paper_id: str, store: PaperStore = Depends(get_store)
+) -> list[Concept]:
+    """Concepts extracted so far. Empty until the POST above has run."""
+    try:
+        return store.concepts(paper_id)
+    except PaperNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such paper.")
+
+
+@router.get("/{concept_id}", response_model=Concept)
+async def get_concept(
+    paper_id: str, concept_id: str, store: PaperStore = Depends(get_store)
+) -> Concept:
+    try:
+        return store.concept(paper_id, concept_id)
+    except PaperNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such paper.")
+    except ConceptNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such concept.")
