@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Secrets and local config
+.env
+.env.local
+
+# Uploaded and generated media -- never committed
+backend/storage/
+backend/clips/
+backend/videos/
+
+# Node (arrives with the frontend milestone)
+node_modules/
+.next/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

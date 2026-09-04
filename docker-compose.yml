@@ -1,0 +1,12 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      ALLOWED_ORIGINS: http://localhost:3000
+    volumes:
+      # Live reload while developing, and uploads that survive a rebuild.
+      - ./backend/app:/app/app
+      - ./backend/storage:/app/storage
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
