@@ -97,11 +97,11 @@ Decisions made in milestone 1 that the later milestones depend on:
 - **Tests exist from commit one**, including a hand-rolled PDF writer in
   `tests/pdf_fixture.py` so the suite needs no binary fixtures.
 
-## Credit
-Not affiliated with that project, with 3blue1brown, or with Grant Sanderson.
+## Note
 
-Manim is a community-maintained project; "3blue1brown-style" describes the
-visual idiom, nothing more.
+Not affiliated with 3blue1brown or Grant Sanderson. Manim is a
+community-maintained project; "3blue1brown-style" describes the visual idiom,
+nothing more.
 
 ## License
 
