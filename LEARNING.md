@@ -158,13 +158,77 @@ at `-ql` inside a container with no network.
 
 ---
 
-## Milestone 4 — Generated animation *(next)*
+## Milestone 4 — Generated animation
 
-**Plan:** replace `build_scene()` with an LLM call, and add the correction
-loop: render, and on failure feed the captured stderr back to the model as the
-next prompt, up to N attempts. The seam is already in place — `RenderError`
-carries `stderr` precisely for this.
+**Built:** the generate-check-render-correct loop, a static code checker, and a
+degraded-but-not-failed fallback. Twenty new tests.
 
-**To find out:** how often the first attempt renders at all, whether the error
-text is actually useful to the model, and whether constraining generation to a
-small set of my own primitives beats letting it write raw Manim.
+**Verified for real:** a deliberately broken scene rendered through the actual
+container produced 3,455 characters of stderr, which distils to 1,341
+characters ending on `AttributeError: Text object has no attribute 'nudge'`,
+with a pointer at `/manim/scene.py:7`. That is genuinely fixable feedback. The
+loop itself has still only been exercised against a scripted model -- there is
+no API key on this machine.
+
+**Things I learned**
+
+- **Field order in a response schema is load-bearing.** `ManimScene` declares
+  `plan` before `code`, and structured output is generated in declaration
+  order, so the model commits to an approach in prose before it starts emitting
+  Python. Putting `code` first means it starts typing before it has decided
+  what it is animating.
+- **The error text is the entire technique.** There is no clever prompt for
+  "write correct Manim". There is a cheap loop that hands the model its own
+  code and its own traceback. Everything hard is in making that traceback
+  legible.
+- **Rich-formatted tracebacks are mostly frame.** Manim's stderr is drawn in
+  box characters around its own source. Stripping the decoration and leading
+  with the final exception line cut the payload by 60% and guaranteed that the
+  one useful line survives truncation. I only knew to do this because I ran a
+  real failure and looked at the bytes.
+- **Correct colder than you generate.** First attempt at 0.6, corrections at
+  0.1. A fix should be conservative; a first draft can be creative.
+- **Static checks are a feedback loop, not a security boundary.** `compile()`
+  plus an AST pass rejects unrenderable code in microseconds rather than paying
+  a container start. Any source-reading check can be evaded, which is precisely
+  why the sandbox does not depend on one. The module docstring says this so
+  nobody later mistakes it for defence.
+- **Reject with instructions, not diagnoses.** Every `CodeRejected` message is
+  written to be pasted straight into the next prompt: "the class is named X,
+  but it must be named Y. Rename the class and keep everything else."
+- **A duplicated FastAPI dependency is a silent test hole.** `dependency_overrides`
+  is keyed on the function object, so defining `provide_llm` in two routers
+  means a stub that only takes effect on half the routes. Consolidated into
+  `api/deps.py`.
+
+**Open questions for later**
+
+- No idea what the real first-attempt success rate is. That needs a key and a
+  golden set of concepts -- the obvious next measurement, and the thing that
+  would turn prompt changes from guesswork into evidence.
+- Three attempts is a guess. If most failures are LaTeX, constraining the model
+  to `Text` entirely might beat correcting it.
+- Every attempt regenerates from scratch. Sending the *previous* plan along
+  with the error might keep more of what was working.
+- Nothing caches. The same concept re-renders from zero every time.
+
+**Deliberate divergences from the reference project**
+
+- The reference sanitises model output with several hundred lines of regex
+  before rendering. This corrects with the model instead of patching around it,
+  and validates with an AST rather than string matching.
+- Its generated code runs on the host. This runs in a container with no
+  network.
+- Its failures skip the scene silently. This degrades to a known-good card and
+  reports `generated: false`, so a caller can tell the difference.
+
+---
+
+## Milestone 5 — Narration *(next)*
+
+**Plan:** text-to-speech per scene, muxed to the video, with scene duration
+driven by audio length rather than guessed.
+
+**Known obstacle, found in milestone 3:** the manim image ships no ffmpeg CLI
+-- it uses PyAV's bundled libav. So muxing means either using PyAV directly or
+building a derived image with ffmpeg installed. Decide before writing code.

@@ -54,6 +54,15 @@ class Settings(BaseSettings):
     # Renders currently block the request. Milestone 6 moves them off it.
     render_timeout_seconds: float = 300.0
 
+    # --- Generated animation (milestone 4) ---
+    # Attempts at the generate-render-correct loop before giving up. Each
+    # failed attempt costs one model call plus one container start.
+    max_render_attempts: int = 3
+
+    # When every attempt fails, render the hand-written title card instead so
+    # the caller still gets a video.
+    fallback_to_title_card: bool = True
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]

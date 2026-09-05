@@ -1,8 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.concepts import provide_llm
-from app.api.videos import provide_renderer
+from app.api.deps import provide_llm, provide_renderer
 from app.config import Settings, get_settings
 from app.main import app
 from app.services.llm import StubLLM

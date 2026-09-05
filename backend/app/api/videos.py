@@ -3,9 +3,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..config import Settings, get_settings
-from ..scenes import build_scene
-from ..services.render import RenderError, RenderTimeout, build_renderer
+from ..models import RenderAttempt
+from ..services.animation import animate_concept
+from ..services.llm.base import LLMClient
 from ..services.render.base import Renderer
+from .deps import provide_llm, provide_renderer
 from ..services.store import (
     ConceptNotFoundError,
     PaperNotFoundError,
@@ -19,19 +21,10 @@ router = APIRouter(prefix="/papers/{paper_id}/concepts/{concept_id}/video", tags
 class RenderResponse(BaseModel):
     concept_id: str
     video_url: str
-    scene_name: str
     seconds: float
-
-
-def provide_renderer(settings: Settings = Depends(get_settings)) -> Renderer:
-    """The renderer dependency. Tests override this with a stub."""
-    return build_renderer(
-        settings.renderer_image,
-        settings.render_quality,
-        settings.render_memory,
-        settings.render_cpus,
-        settings.renderer_docker_bin,
-    )
+    generated: bool  # False when every attempt failed and the card was used
+    plan: str        # what the model said it was going to animate
+    attempts: list[RenderAttempt]
 
 
 @router.post("", response_model=RenderResponse, status_code=status.HTTP_201_CREATED)
@@ -41,12 +34,12 @@ async def render_concept_video(
     settings: Settings = Depends(get_settings),
     store: PaperStore = Depends(get_store),
     renderer: Renderer = Depends(provide_renderer),
+    llm: LLMClient = Depends(provide_llm),
 ) -> RenderResponse:
-    """Render this concept's title card and store the mp4.
+    """Have the model write an animation for this concept, and render it.
 
-    This blocks the request for the length of the render -- tens of seconds at
-    `-qm`. That is a known and deliberate milestone-3 shortcut: the point here
-    is to learn the render pipeline, and milestone 6 moves it onto a queue.
+    Still blocking, and now blocking for longer: up to `max_render_attempts`
+    model calls and container starts. Milestone 6 moves this onto a queue.
     """
     try:
         concept = store.concept(paper_id, concept_id)
@@ -55,30 +48,38 @@ async def render_concept_video(
     except ConceptNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such concept.")
 
-    code, scene_name = build_scene(concept)
-    destination = store.video_path(concept_id)
+    outcome = await animate_concept(
+        llm,
+        renderer,
+        concept,
+        store.video_path(concept_id),
+        max_attempts=settings.max_render_attempts,
+        timeout=settings.render_timeout_seconds,
+        fallback=settings.fallback_to_title_card,
+    )
 
-    try:
-        result = await renderer.render(
-            code=code,
-            scene_name=scene_name,
-            destination=destination,
-            timeout=settings.render_timeout_seconds,
+    if outcome.result is None:
+        # Every attempt failed and the fallback did too, or is switched off.
+        # The attempt log goes in the response so the caller can see why --
+        # it is our own diagnostics, not raw renderer stderr.
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            {
+                "message": f"Could not render this concept in "
+                f"{settings.max_render_attempts} attempts.",
+                "attempts": [a.model_dump() for a in outcome.attempts],
+            },
         )
-    except RenderTimeout as exc:
-        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, str(exc)) from exc
-    except RenderError as exc:
-        # The stderr is not returned to the client -- it can name host paths.
-        # From milestone 4 it becomes the model's correction prompt instead.
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
 
     url = f"/api/papers/{paper_id}/concepts/{concept_id}/video"
     store.set_video(paper_id, concept_id, url)
     return RenderResponse(
         concept_id=concept_id,
         video_url=url,
-        scene_name=result.scene_name,
-        seconds=round(result.seconds, 2),
+        seconds=round(outcome.result.seconds, 2),
+        generated=outcome.generated,
+        plan=outcome.plan,
+        attempts=outcome.attempts,
     )
 
 

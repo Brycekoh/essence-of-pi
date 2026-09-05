@@ -4,8 +4,9 @@ from pydantic import BaseModel
 from ..config import Settings, get_settings
 from ..models import Concept
 from ..services.concepts import extract_concepts
-from ..services.llm import LLMError, LLMNotConfigured, build_llm
+from ..services.llm import LLMError
 from ..services.llm.base import LLMClient
+from .deps import provide_llm
 from ..services.store import (
     ConceptNotFoundError,
     PaperNotFoundError,
@@ -21,18 +22,6 @@ class ExtractionResult(BaseModel):
     concepts: list[Concept]
     truncated: bool  # true if the paper was longer than the model budget
     model: str
-
-
-def provide_llm(settings: Settings = Depends(get_settings)) -> LLMClient:
-    """The LLM dependency, and the place a missing key becomes a clean 503.
-
-    Letting `build_llm` raise inside dependency resolution would surface as an
-    opaque 500. Tests override this function to inject a stub.
-    """
-    try:
-        return build_llm(settings.gemini_api_key, settings.llm_model)
-    except LLMNotConfigured as exc:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
 
 @router.post("", response_model=ExtractionResult, status_code=status.HTTP_201_CREATED)

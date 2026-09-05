@@ -16,7 +16,11 @@ _FAKE_MP4 = bytes.fromhex("0000001c667479706d70343200000200") + b"eop-stub-rende
 
 class StubRenderer:
     def __init__(self, error: Exception | None = None):
+        # `error` fails every call; `errors` is a queue, so a test can make the
+        # first render fail and the second succeed -- which is the whole point
+        # of the correction loop.
         self.error = error
+        self.errors: list[Exception] = []
         self.calls: list[dict] = []
 
     async def render(
@@ -25,6 +29,8 @@ class StubRenderer:
         self.calls.append(
             {"code": code, "scene_name": scene_name, "destination": destination}
         )
+        if self.errors:
+            raise self.errors.pop(0)
         if self.error:
             raise self.error
 

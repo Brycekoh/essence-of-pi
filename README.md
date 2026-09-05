@@ -5,15 +5,17 @@ Research papers, distilled into 3blue1brown-style explainers.
 Upload a paper, get back the handful of ideas that actually matter, and watch
 each one become a short animated video.
 
-> **Status: milestone 3 of 8.** Papers go in, concepts come out, and each
-> concept renders to an actual mp4. The animation is still hand-written — no
-> model writes Manim code until milestone 4. This is a learning build, in public, one milestone per
+> **Status: milestone 4 of 8.** Papers go in, concepts come out, and a model
+> writes the Manim for each one — retrying against its own error output when a
+> render fails. No narration or multi-scene stitching yet. This is a learning build, in public, one milestone per
 > commit — see [LEARNING.md](LEARNING.md) for the running log.
 
 ## What works today
 
 ```
-PDF upload → pdfplumber extraction → LLM concepts → Manim render (in Docker) → mp4
+PDF → pdfplumber → LLM concepts → LLM writes Manim → static check → render in Docker
+                                        ▲                                │
+                                        └──── the error, on failure ─────┘
 ```
 
 | Method | Route | Does |
@@ -27,7 +29,7 @@ PDF upload → pdfplumber extraction → LLM concepts → Manim render (in Docke
 | `POST` | `/api/papers/{id}/concepts` | Extract concepts with an LLM (replaces any previous set) |
 | `GET` | `/api/papers/{id}/concepts` | Concepts extracted so far |
 | `GET` | `/api/papers/{id}/concepts/{cid}` | One concept |
-| `POST` | `/api/papers/{id}/concepts/{cid}/video` | Render this concept's card to mp4 |
+| `POST` | `/api/papers/{id}/concepts/{cid}/video` | Model writes an animation; render it, correcting on failure |
 | `GET` | `/api/papers/{id}/concepts/{cid}/video` | Stream the rendered mp4 |
 | `GET` | `/health` | Liveness check |
 
@@ -88,7 +90,7 @@ docker compose up --build
       structured output rather than parsing prose.
 - [x] **3 — First render.** A hand-written Manim scene, rendered by the backend
       and served as an mp4.
-- [ ] **4 — Generated animation.** The LLM writes the Manim code; failed renders
+- [x] **4 — Generated animation.** The LLM writes the Manim code; failed renders
       feed their own stderr back in for a correction pass.
 - [ ] **5 — Narration.** Text-to-speech per scene, muxed to video, scene timing
       driven by audio length.
@@ -135,6 +137,17 @@ Decisions made in milestone 1 that the later milestones depend on:
 - **Concept text enters generated Python as a literal, never an expression.**
   `repr()`, not string interpolation — so a concept named `"); import os` is
   inert data.
+- **Static checks are a feedback loop, not a defence.** `compile()` plus an AST
+  pass rejects unrenderable code in microseconds instead of paying for a
+  container start. The container is what makes bad code *safe*; the AST pass
+  only makes failure *fast*. `services/codecheck.py` says so at the top.
+- **The error message is the correction prompt.** `RenderError` carries stderr
+  precisely so the next attempt can be "here is your code, here is what it
+  did". Correction runs at a lower temperature than generation — a fix should
+  be conservative.
+- **Failure degrades instead of erroring.** When every attempt fails, the
+  hand-written card from milestone 3 renders instead, and the response says
+  `generated: false`. That is the reason milestone 3 built a template first.
 
 ## Note
 

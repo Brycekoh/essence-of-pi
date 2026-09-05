@@ -16,7 +16,7 @@ The shape of the finished system, and how much of it exists so far.
                         └───────┬───────┘
                                 │ concept
                         ┌───────▼───────┐
-                        │  scene split  │   ← milestone 4
+                        │  animation    │   ← milestone 4 (DONE)
                         └───────┬───────┘
                                 │ scenes
               ┌─────────────────┼─────────────────┐
@@ -42,7 +42,7 @@ The shape of the finished system, and how much of it exists so far.
                └───────────────┘
 ```
 
-## Milestones 1-3, as built
+## Milestones 1-4, as built
 
 ```
 backend/
@@ -60,6 +60,8 @@ backend/
 │       ├── pdf_parser.py    pdfplumber, run off the event loop
 │       ├── concepts.py      owns the prompt and the post-validation
 │       ├── store.py         PaperStore — the seam Postgres slots into later
+│       ├── animation.py  the generate-check-render-correct loop
+│       ├── codecheck.py  AST checks: fast feedback, NOT the sandbox
 │       ├── llm/
 │       │   ├── base.py      LLMClient protocol — one method, `structured`
 │       │   ├── gemini.py    response_schema + retry with backoff
@@ -75,7 +77,8 @@ backend/
     ├── test_papers.py       the ingestion API
     ├── test_concepts.py     the extraction API and service
     ├── test_llm_gemini.py   schema compatibility, config errors, caching
-    └── test_video.py        render API, scene generation, sandbox flags
+    ├── test_video.py        render API, scene generation, sandbox flags
+    └── test_animation.py    the correction loop and the static checks
 ```
 
 **Request path for an upload**
@@ -119,6 +122,20 @@ Failures map to status codes deliberately: no API key → 503, upstream failure 
 Failures map deliberately: render failure → 502, timeout → 504, daemon down →
 502 with instructions. Captured stderr is never returned to the client; it
 names host paths, and from milestone 4 it becomes the correction prompt.
+
+**The correction loop (milestone 4)**
+
+```
+   ask the model for a scene  ──▶  compile() + AST check  ──▶  render in Docker
+             ▲                            │                          │
+             │                            │ rejected                 │ failed
+             └──── distilled error ◀──────┴──────────────────────────┘
+                    (max 3 attempts, then the milestone-3 card)
+```
+
+The static check exists to fail in microseconds instead of seconds; the
+container exists to fail *safely*. They are not the same mechanism and the code
+says so.
 
 **The three load-bearing seams**
 

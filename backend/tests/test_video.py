@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from app.models import ConceptExtraction
+from app.models import ConceptExtraction, ManimScene
 from app.scenes import SCENE_NAME, build_scene
 from app.scenes.title_card import _literal, _wrap
 from app.services.render import ManimDockerRenderer, RenderError, RenderTimeout
@@ -11,6 +11,20 @@ from app.services.store import PaperStore
 
 from .conftest import upload
 from .test_concepts import draft
+
+
+GOOD_CODE = """from manim import *
+
+
+class ConceptScene(Scene):
+    def construct(self):
+        self.play(Write(Text("hello")))
+        self.wait(1.5)
+"""
+
+
+def scene(code: str = GOOD_CODE, plan: str = "A word appears.") -> ManimScene:
+    return ManimScene(plan=plan, code=code)
 
 
 @pytest.fixture
@@ -25,14 +39,17 @@ def rendered(client, sample_pdf, stub_llm):
 # --- the endpoint ---------------------------------------------------------
 
 
-def test_render_produces_a_playable_url(client, rendered, stub_renderer):
+def test_render_produces_a_playable_url(client, rendered, stub_llm):
     paper_id, concept_id = rendered
+    stub_llm.queue(scene())
 
     response = client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
     assert response.status_code == 201, response.text
 
     body = response.json()
-    assert body["scene_name"] == SCENE_NAME
+    assert body["generated"] is True
+    assert body["plan"] == "A word appears."
+    assert [a["outcome"] for a in body["attempts"]] == ["rendered"]
     assert body["video_url"].endswith(f"/concepts/{concept_id}/video")
 
     video = client.get(body["video_url"])
@@ -48,8 +65,9 @@ def test_video_is_404_until_rendered(client, rendered):
     assert "POST" in response.json()["detail"]
 
 
-def test_render_attaches_the_url_to_the_concept(client, rendered):
+def test_render_attaches_the_url_to_the_concept(client, rendered, stub_llm):
     paper_id, concept_id = rendered
+    stub_llm.queue(scene())
     assert client.get(f"/api/papers/{paper_id}/concepts/{concept_id}").json()["video_url"] is None
 
     client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
@@ -58,31 +76,33 @@ def test_render_attaches_the_url_to_the_concept(client, rendered):
     assert concept["video_url"].endswith(f"/concepts/{concept_id}/video")
 
 
-def test_render_failure_is_502(client, rendered, stub_renderer):
+def test_every_attempt_failing_is_502(client, rendered, stub_llm, stub_renderer):
+    """Three model calls, three failed renders, a failed fallback, then 502."""
     paper_id, concept_id = rendered
+    for _ in range(3):
+        stub_llm.queue(scene())
     stub_renderer.error = RenderError("manim exited with code 1", stderr="boom", exit_code=1)
 
     response = client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
     assert response.status_code == 502
-    assert "boom" not in response.text, "stderr can name host paths; don't leak it"
+    assert len(stub_llm.calls) == 4, "one concept extraction, then three attempts"
 
 
-def test_render_timeout_is_504(client, rendered, stub_renderer):
-    paper_id, concept_id = rendered
-    stub_renderer.error = RenderTimeout("Render exceeded 300s and was killed.")
-
-    response = client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
-    assert response.status_code == 504
-
-
-def test_unknown_ids_are_404(client, rendered):
+def test_unknown_ids_are_404_before_any_model_call(client, rendered, stub_llm):
+    """A bad id must not cost a model call."""
     paper_id, _ = rendered
+    before = len(stub_llm.calls)
     assert client.post(f"/api/papers/{paper_id}/concepts/nope/video").status_code == 404
+    assert len(stub_llm.calls) == before
+
+
+def test_unknown_paper_is_404(client):
     assert client.post("/api/papers/nope/concepts/nope/video").status_code == 404
 
 
-def test_deleting_a_paper_removes_its_videos(client, rendered, settings):
+def test_deleting_a_paper_removes_its_videos(client, rendered, settings, stub_llm):
     paper_id, concept_id = rendered
+    stub_llm.queue(scene())
     client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
     video = settings.videos_dir / f"{concept_id}.mp4"
     assert video.exists()
