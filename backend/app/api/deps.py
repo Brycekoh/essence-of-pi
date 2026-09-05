@@ -22,7 +22,7 @@ def provide_llm(settings: Settings = Depends(get_settings)) -> LLMClient:
     opaque 500.
     """
     try:
-        return build_llm(settings.gemini_api_key, settings.llm_model)
+        return build_llm(settings.gemini_api_key, settings.llm_models_csv)
     except LLMNotConfigured as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 

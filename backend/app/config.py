@@ -28,13 +28,26 @@ class Settings(BaseSettings):
     # Absent by default, so the app still boots without a key; the concept
     # endpoints return 503 with instructions instead of crashing at startup.
     gemini_api_key: str | None = None
-    llm_model: str = "gemini-2.0-flash"
+    # Pinned, not `gemini-flash-latest`: an alias silently changes the model
+    # under you, which makes a measured success rate meaningless.
+    llm_model: str = "gemini-3.8-flash"
+
+    # Tried in order when the primary is busy or out of quota. The free-tier
+    # limit is 20 requests per day *per model*, so a rotation multiplies the
+    # daily budget in a way that retrying one model cannot.
+    llm_fallback_models: str = "gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash"
+
+    @property
+    def llm_models_csv(self) -> str:
+        return ",".join([self.llm_model, self.llm_fallback_models])
 
     # How many concepts to ask for per paper.
     max_concepts: int = 6
 
     # How much of the paper to send. See services/concepts.py for the reasoning.
-    max_chars_to_model: int = 60_000
+    # Lowered from 60k after 60k-character prompts drew repeated 503s on the
+    # free tier while short prompts to the same model answered instantly.
+    max_chars_to_model: int = 30_000
 
     # --- Rendering (milestone 3) ---
     videos_dir: Path = BACKEND_ROOT / "storage" / "videos"

@@ -27,7 +27,8 @@ class LLMNotConfigured(LLMError):
 class LLMClient(Protocol):
     """Structural type -- implementations don't inherit from this."""
 
-    model: str
+    model: str        # the configured primary
+    last_model: str   # the one that actually answered, after any fallback
 
     async def structured(
         self,

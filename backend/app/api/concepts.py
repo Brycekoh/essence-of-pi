@@ -65,7 +65,7 @@ async def create_concepts(
         paper_id=paper_id,
         concepts=concepts,
         truncated=truncated,
-        model=llm.model,
+        model=getattr(llm, "last_model", llm.model),
     )
 
 

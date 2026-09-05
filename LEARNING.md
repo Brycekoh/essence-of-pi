@@ -224,6 +224,59 @@ no API key on this machine.
 
 ---
 
+## Interlude — first contact with a real provider
+
+Ran the whole pipeline against Gemini for the first time, on the Batch
+Normalization paper (arXiv 1502.03167, 11 pages, 42k characters).
+
+**What worked.** Concept extraction, and well: six concepts, correctly ordered
+so prerequisites come first, with page citations that check out. Not a
+restatement of the abstract. It took 56 seconds for one call.
+
+**What did not.** Zero of six concepts got an animation generated. Not because
+the model wrote bad Manim -- because it never wrote any. Every attempt failed
+at the provider: two on 503 "high demand", four on 429.
+
+```
+quotaId: GenerateRequestsPerDayPerProjectPerModel
+quotaValue: 20
+```
+
+**Twenty requests per day, per model.** That single fact invalidated a design
+decision I had made an hour earlier.
+
+**Things I learned**
+
+- **Know which resource is scarce before designing a retry policy.** I had just
+  lengthened the backoff to 2s/6s/18s to survive demand spikes -- correct if
+  latency is the constraint, actively harmful when the quota counts *requests*.
+  Combined with a fallback model, one logical call became up to eight requests.
+  Six concepts consumed roughly forty requests against a budget of twenty.
+- **The fix is rotation, not persistence.** The quota is per-model and the
+  account has a dozen flash models. Retrying one model harder buys nothing;
+  trying a different model buys a whole fresh budget. Now: one retry per model,
+  then move on, and remember which models returned 429 so no request is ever
+  spent rediscovering that.
+- **429 is not retryable and never was.** It is the one error where trying
+  again is guaranteed to fail *and* costs the thing you are short of.
+- **The fallback path justified itself immediately.** Every generation request
+  failed and 6/6 concepts still returned a playable video, with
+  `generated: false` so the caller can tell. That was written as a nicety in
+  milestone 4 and turned out to be the only reason the endpoint worked at all
+  on its first real day.
+- **Model availability is not what the docs say.** `gemini-2.0-flash` and
+  `gemini-2.5-flash` both 404 despite being listed; `3.6-flash` was down while
+  `3.8-flash` answered in 1.6s; `3.7-flash` took 49s for a one-word reply.
+  Capacity moves minute to minute. Ask the API, not the documentation.
+- **A one-line prompt succeeded while a 60k-character prompt to the same model
+  in the same minute got 503.** Capacity is refused per request, not per model.
+
+**Still unmeasured:** the first-attempt render rate, which is the entire point
+of milestone 4. `scripts/measure_generation.py` exists to answer it the moment
+there is quota to spend.
+
+---
+
 ## Milestone 5 — Narration *(next)*
 
 **Plan:** text-to-speech per scene, muxed to the video, with scene duration

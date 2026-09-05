@@ -37,6 +37,15 @@ The concept endpoints need `GEMINI_API_KEY` in `backend/.env` (a free key comes
 from [AI Studio](https://aistudio.google.com/apikey)). Without one the app still
 boots and serves papers; the concept routes return `503` explaining what to set.
 
+**Free-tier reality check:** Gemini's free tier allows **20 requests per day,
+per model**. Concept extraction costs one; each video costs one to three. The
+client therefore rotates through `LLM_FALLBACK_MODELS` rather than retrying a
+single model, since the quota is per-model. Measure the generation loop with:
+
+```bash
+.venv/Scripts/python.exe scripts/measure_generation.py path/to/paper.pdf
+```
+
 Rendering needs Docker running and the manim image pulled once (~2 GB):
 
 ```bash
@@ -148,6 +157,13 @@ Decisions made in milestone 1 that the later milestones depend on:
 - **Failure degrades instead of erroring.** When every attempt fails, the
   hand-written card from milestone 3 renders instead, and the response says
   `generated: false`. That is the reason milestone 3 built a template first.
+  On its first contact with reality this was the only thing that worked: the
+  provider refused every generation request, and 6/6 concepts still returned a
+  playable video.
+- **Retrying is not free when the quota counts requests.** At 20 requests per
+  day per model, a generous retry policy spends the day's budget on a queue
+  that is not moving. Each model gets one retry, then the client moves to the
+  next model — and remembers which ones returned 429.
 
 ## Note
 

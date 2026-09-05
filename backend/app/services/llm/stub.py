@@ -16,6 +16,7 @@ T = TypeVar("T", bound=BaseModel)
 
 class StubLLM:
     model = "stub"
+    last_model = "stub"
 
     def __init__(self, responses: Optional[list[Any]] = None):
         self.responses: list[Any] = list(responses or [])
