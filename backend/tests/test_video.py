@@ -176,7 +176,10 @@ def test_docker_argv_locks_down_the_container(tmp_path):
     assert "--rm" in argv
     assert "--name" in argv, "an unnamed container cannot be killed on timeout"
     assert argv[-2:] == ["scene.py", "ConceptCard"]
-    assert f"{tmp_path}:/manim" in argv
+    assert f"{tmp_path}:/work" in argv
+    # Without --workdir the image's own WORKDIR wins and `scene.py` is not
+    # found -- which is exactly how this broke once.
+    assert "--workdir" in argv and argv[argv.index("--workdir") + 1] == "/work"
 
 
 @pytest.mark.skipif(

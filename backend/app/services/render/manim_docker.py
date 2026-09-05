@@ -13,18 +13,19 @@ The container gets no network, a memory ceiling and a CPU quota, and is killed
 on timeout.
 """
 
-import asyncio
 import shutil
 import time
-import uuid
 from pathlib import Path
 
+from ..container import CONTAINER_WORKDIR, ContainerError, ContainerTimeout
+from ..container import build_argv as build_container_argv
+from ..container import container_name
+from ..container import run as run_container
 from .base import RenderError, RenderResult, RenderTimeout
 
 # Manim writes to <media_dir>/videos/<source stem>/<resolution>/<Scene>.mp4.
 # The resolution directory name depends on the quality flag, so the output is
 # located by globbing rather than by reconstructing that path.
-_CONTAINER_WORKDIR = "/manim"
 
 
 class ManimDockerRenderer:
@@ -51,13 +52,13 @@ class ManimDockerRenderer:
         destination: Path,
         timeout: float,
     ) -> RenderResult:
-        workdir = destination.parent / f".render-{uuid.uuid4().hex}"
+        workdir = destination.parent / f".render-{container_name('')[1:]}"
         workdir.mkdir(parents=True, exist_ok=True)
         (workdir / "scene.py").write_text(code, encoding="utf-8")
 
         # Named so it can be killed on timeout. Killing the `docker run` client
         # process does NOT stop the container it started -- the daemon owns it.
-        container = f"eop-render-{uuid.uuid4().hex[:12]}"
+        container = container_name("eop-render")
         argv = self.build_argv(workdir=workdir, container=container, scene_name=scene_name)
 
         started = time.monotonic()
@@ -100,64 +101,28 @@ class ManimDockerRenderer:
         Every flag between `--name` and the image is load-bearing from
         milestone 4 onward, when the code inside `workdir` is model-written.
         """
-        return [
-            self.docker_bin, "run", "--rm",
-            "--name", container,
-            "--network", "none",           # generated code gets no internet
-            "--memory", self.memory,
-            "--cpus", self.cpus,
-            "--volume", f"{workdir}:{_CONTAINER_WORKDIR}",
-            self.image,
-            "manim", self.quality, "--format=mp4",
-            "--media_dir", f"{_CONTAINER_WORKDIR}/media",
-            "scene.py", scene_name,
-        ]
+        return build_container_argv(
+            image=self.image,
+            command=[
+                "manim", self.quality, "--format=mp4",
+                "--media_dir", f"{CONTAINER_WORKDIR}/media",
+                "scene.py", scene_name,
+            ],
+            workdir=workdir,
+            container=container,
+            memory=self.memory,
+            cpus=self.cpus,
+            docker_bin=self.docker_bin,
+        )
 
     async def _run(
         self, argv: list[str], container: str, timeout: float
     ) -> tuple[str, str, int]:
         try:
-            process = await asyncio.create_subprocess_exec(
-                *argv,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            return await run_container(
+                argv, container=container, timeout=timeout, docker_bin=self.docker_bin
             )
-        except FileNotFoundError as exc:
-            raise RenderError(
-                f"`{self.docker_bin}` is not on PATH. Install Docker Desktop, "
-                "or point RENDERER_DOCKER_BIN at the binary."
-            ) from exc
-
-        try:
-            out, err = await asyncio.wait_for(process.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
-            await self._kill_container(container)
-            process.kill()
-            await process.wait()
-            raise RenderTimeout(
-                f"Render exceeded {timeout:.0f}s and was killed.",
-                stderr="",
-            )
-
-        stderr = err.decode("utf-8", "replace")
-        if process.returncode != 0 and "Cannot connect to the Docker daemon" in stderr:
-            raise RenderError(
-                "The Docker daemon is not running. Start Docker Desktop and retry.",
-                stderr=stderr,
-                exit_code=process.returncode,
-            )
-
-        return out.decode("utf-8", "replace"), stderr, process.returncode or 0
-
-    async def _kill_container(self, container: str) -> None:
-        """Stop the container the timed-out client left behind."""
-        try:
-            killer = await asyncio.create_subprocess_exec(
-                self.docker_bin, "kill", container,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await asyncio.wait_for(killer.wait(), timeout=15)
-        except (OSError, asyncio.TimeoutError):
-            # Best effort. `--rm` cleans up whenever it does exit.
-            pass
+        except ContainerTimeout as exc:
+            raise RenderTimeout(str(exc)) from exc
+        except ContainerError as exc:
+            raise RenderError(str(exc), stderr=exc.stderr, exit_code=exc.exit_code) from exc

@@ -46,11 +46,17 @@ single model, since the quota is per-model. Measure the generation loop with:
 .venv/Scripts/python.exe scripts/measure_generation.py path/to/paper.pdf
 ```
 
-Rendering needs Docker running and the manim image pulled once (~2 GB):
+Rendering needs Docker running and the render image built once (~2 GB base
+plus ffmpeg):
 
 ```bash
 docker pull manimcommunity/manim:stable
+cd backend && docker build -f Dockerfile.render -t essence-of-pi/render:latest .
 ```
+
+The upstream manim image has **no ffmpeg binary** — manim 0.21 renders through
+PyAV's bundled libav — so narration could not be muxed on it. The derived image
+carries manim, LaTeX and ffmpeg, and is the sandbox for all three.
 
 Nothing else is installed on the host — no manim, no ffmpeg, no LaTeX. If the
 daemon is down the render route returns `502` saying so.
@@ -101,8 +107,9 @@ docker compose up --build
       and served as an mp4.
 - [x] **4 — Generated animation.** The LLM writes the Manim code; failed renders
       feed their own stderr back in for a correction pass.
-- [ ] **5 — Narration.** Text-to-speech per scene, muxed to video, scene timing
-      driven by audio length.
+- [~] **5 — Narration.** *In progress.* Speech and media seams built and
+      tested against real ffmpeg; not yet wired to the endpoints. Scene timing
+      from audio length is the remaining piece.
 - [ ] **6 — Concurrency and progress.** A real job queue, parallel renders, live
       progress in the UI.
 - [ ] **7 — Frontend.** Next.js: upload, browse concepts, watch clips.

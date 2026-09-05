@@ -277,11 +277,53 @@ there is quota to spend.
 
 ---
 
-## Milestone 5 — Narration *(next)*
+## Milestone 5 — Narration *(in progress)*
 
-**Plan:** text-to-speech per scene, muxed to the video, with scene duration
-driven by audio length rather than guessed.
+**Built so far:** the LLM-free half. A `Speech` seam with gTTS behind it, a
+`MediaTool` seam with ffmpeg behind it (probe, mux, concat), a derived Docker
+image carrying manim *and* ffmpeg, and a shared container helper both the
+renderer and ffmpeg now use.
 
-**Known obstacle, found in milestone 3:** the manim image ships no ffmpeg CLI
--- it uses PyAV's bundled libav. So muxing means either using PyAV directly or
-building a derived image with ffmpeg installed. Decide before writing code.
+**Verified for real:** a 3s test video plus 5s of audio muxes to 5.0s with the
+last frame held; two clips concatenate to 10s. Then end to end on real content
+-- two Batch Normalization concepts rendered, narrated with gTTS, muxed and
+stitched into 26.9 seconds of video with sound.
+
+**The obstacle from milestone 3, resolved.** The manim image has no ffmpeg
+binary; manim 0.21 renders through PyAV's bundled libav. Rather than rewrite
+muxing in PyAV, `Dockerfile.render` adds ffmpeg to the base image. It builds in
+7 seconds on top of the 2 GB base and means one sandbox does rendering, probing,
+muxing and concatenation.
+
+**Things I learned**
+
+- **The narration is 2.5x longer than the animation.** Measured: 5.3s of video
+  against 13.7s of speech. Padding the video holds a dead frame for eight
+  seconds. So the order has to invert -- synthesise narration first, measure
+  it, then tell the scene how long to run. Padding is the safety net, not the
+  plan. I would have designed this the wrong way round without rendering one.
+- **`--workdir` is not optional.** Moving the mount from `/manim` to a shared
+  `/work` broke rendering instantly, because the image's own WORKDIR won and
+  `scene.py` resolved somewhere the mounted files were not. There is now a test
+  asserting the flag.
+- **Two callers made the container helper worth extracting.** Timeout handling,
+  kill-by-name and the sandbox flags were about to be written a second time for
+  ffmpeg. One helper, one place to get the security flags right.
+- **A test can synthesise its own media.** `ffmpeg -f lavfi -i testsrc` and
+  `anullsrc` produce real video and audio on demand, so the integration tests
+  need no checked-in fixtures -- the same instinct as the hand-written PDF
+  writer in milestone 1.
+
+**Still to do in this milestone**
+
+- Split a concept into several scenes.
+- Generate narration per scene, then drive `self.wait()` and `run_time` from
+  its measured duration.
+- Wire it into the endpoint, replacing the single-clip render.
+
+**Deliberate divergences from the reference project**
+
+- The reference shells out to ffmpeg on the host. Here ffmpeg runs in the same
+  network-isolated container as the renderer.
+- Narration sits behind a `Speech` protocol, so gTTS is a starting point rather
+  than a commitment.

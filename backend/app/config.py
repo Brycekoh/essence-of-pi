@@ -52,8 +52,12 @@ class Settings(BaseSettings):
     # --- Rendering (milestone 3) ---
     videos_dir: Path = BACKEND_ROOT / "storage" / "videos"
 
-    # Renders happen inside this image, which carries manim, ffmpeg and LaTeX.
-    renderer_image: str = "manimcommunity/manim:stable"
+    # Renders and audio work both happen inside this image, which carries
+    # manim, LaTeX *and* ffmpeg. Build it once:
+    #   docker build -f Dockerfile.render -t essence-of-pi/render:latest .
+    # The upstream manimcommunity image has no ffmpeg binary, so muxing
+    # narration would be impossible on it.
+    renderer_image: str = "essence-of-pi/render:latest"
     renderer_docker_bin: str = "docker"
 
     # -ql 480p15 (seconds), -qm 720p30, -qh 1080p60 (minutes).
@@ -75,6 +79,15 @@ class Settings(BaseSettings):
     # When every attempt fails, render the hand-written title card instead so
     # the caller still gets a video.
     fallback_to_title_card: bool = True
+
+    # --- Narration (milestone 5) ---
+    # gTTS needs no key and no quota, which after milestone 4 counts for a lot.
+    # tld changes the accent: com (US), co.uk, com.au.
+    speech_lang: str = "en"
+    speech_tld: str = "com"
+
+    # ffmpeg work is quick; a long timeout here just hides a hung container.
+    media_timeout_seconds: float = 180.0
 
     @property
     def cors_origins(self) -> list[str]:

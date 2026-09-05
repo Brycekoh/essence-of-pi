@@ -1,0 +1,19 @@
+# The rendering sandbox: manim, LaTeX, and ffmpeg in one image.
+#
+# Why this exists: manim 0.19 renders video through PyAV's bundled libav and
+# ships no ffmpeg *binary*. Milestone 5 needs to mux narration onto a clip and
+# concatenate clips, which is a one-line ffmpeg job and a fiddly PyAV one. So
+# the base image gets ffmpeg added rather than the muxing being rewritten.
+#
+# Build (once, ~1 min on top of the 2 GB base):
+#   docker build -f Dockerfile.render -t essence-of-pi/render:latest .
+FROM manimcommunity/manim:stable
+
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+
+# Back to the unprivileged user the base image defines. Generated code runs as
+# this user, with no network and a memory cap -- see services/render/.
+USER manimuser
