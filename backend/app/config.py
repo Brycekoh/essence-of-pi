@@ -36,6 +36,24 @@ class Settings(BaseSettings):
     # How much of the paper to send. See services/concepts.py for the reasoning.
     max_chars_to_model: int = 60_000
 
+    # --- Rendering (milestone 3) ---
+    videos_dir: Path = BACKEND_ROOT / "storage" / "videos"
+
+    # Renders happen inside this image, which carries manim, ffmpeg and LaTeX.
+    renderer_image: str = "manimcommunity/manim:stable"
+    renderer_docker_bin: str = "docker"
+
+    # -ql 480p15 (seconds), -qm 720p30, -qh 1080p60 (minutes).
+    render_quality: str = "-qm"
+
+    # Ceilings on the container. These matter from milestone 4, when the code
+    # being executed is written by a model.
+    render_memory: str = "2g"
+    render_cpus: str = "2"
+
+    # Renders currently block the request. Milestone 6 moves them off it.
+    render_timeout_seconds: float = 300.0
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
@@ -49,4 +67,5 @@ def get_settings() -> Settings:
     """
     settings = Settings()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    settings.videos_dir.mkdir(parents=True, exist_ok=True)
     return settings

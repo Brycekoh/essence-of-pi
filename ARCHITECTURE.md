@@ -42,7 +42,7 @@ The shape of the finished system, and how much of it exists so far.
                └───────────────┘
 ```
 
-## Milestones 1-2, as built
+## Milestones 1-3, as built
 
 ```
 backend/
@@ -51,7 +51,8 @@ backend/
 │   ├── config.py            pydantic-settings; one cached Settings instance
 │   ├── api/
 │   │   ├── papers.py        the six paper routes
-│   │   └── concepts.py      extract / list / read concepts
+│   │   ├── concepts.py      extract / list / read concepts
+│   │   └── videos.py        render a concept, stream the mp4
 │   ├── models/
 │   │   ├── paper.py         Paper, PageText, PaperText
 │   │   └── concept.py       ConceptDraft (the LLM's schema) vs Concept (stored)
@@ -59,15 +60,22 @@ backend/
 │       ├── pdf_parser.py    pdfplumber, run off the event loop
 │       ├── concepts.py      owns the prompt and the post-validation
 │       ├── store.py         PaperStore — the seam Postgres slots into later
-│       └── llm/
-│           ├── base.py      LLMClient protocol — one method, `structured`
-│           ├── gemini.py    response_schema + retry with backoff
-│           └── stub.py      scripted double; tests never hit the network
+│       ├── llm/
+│       │   ├── base.py      LLMClient protocol — one method, `structured`
+│       │   ├── gemini.py    response_schema + retry with backoff
+│       │   └── stub.py      scripted double; tests never hit the network
+│       └── render/
+│           ├── base.py      Renderer protocol; RenderError carries stderr
+│           ├── manim_docker.py  sandboxed container run, killed on timeout
+│           └── stub.py      writes a placeholder mp4, no Docker needed
+│   └── scenes/
+│       └── title_card.py    the hand-written scene, replaced in milestone 4
 └── tests/
     ├── pdf_fixture.py       hand-written PDF generator, no binary fixtures
     ├── test_papers.py       the ingestion API
     ├── test_concepts.py     the extraction API and service
-    └── test_llm_gemini.py   schema compatibility, config errors, caching
+    ├── test_llm_gemini.py   schema compatibility, config errors, caching
+    └── test_video.py        render API, scene generation, sandbox flags
 ```
 
 **Request path for an upload**
@@ -95,10 +103,30 @@ backend/
 Failures map to status codes deliberately: no API key → 503, upstream failure →
 502, readable PDF that yields nothing → 422.
 
-**The two load-bearing seams**
+**Request path for a render**
+
+1. `POST .../concepts/{cid}/video` resolves the concept, or 404s.
+2. `build_scene()` produces Manim source, embedding concept text via `repr()`
+   so it can only ever be data.
+3. The source is written to a scratch directory, which is bind-mounted into a
+   container run with `--network none`, `--memory`, `--cpus` and a name.
+4. On timeout the container is killed by name — killing the `docker run`
+   client would leave it running.
+5. The mp4 is located by glob (the resolution directory depends on the quality
+   flag), moved to `storage/videos/{concept_id}.mp4`, and the URL is attached
+   to the concept.
+
+Failures map deliberately: render failure → 502, timeout → 504, daemon down →
+502 with instructions. Captured stderr is never returned to the client; it
+names host paths, and from milestone 4 it becomes the correction prompt.
+
+**The three load-bearing seams**
 
 - `PaperStore` — everything touching persistence goes through it. Swapping it
   for Postgres in milestone 8 should not require editing any router.
 - `LLMClient` — one method, `structured(prompt, schema) -> schema`. Every later
   model call (scene splitting, Manim generation, narration) is that same shape,
   so the provider stays swappable and every test stays offline.
+- `Renderer` — one method, `render(code, scene_name, destination, timeout)`.
+  Milestone 3 feeds it code we wrote; milestone 4 feeds it code a model wrote.
+  Nothing else changes, which is the point of building it now.

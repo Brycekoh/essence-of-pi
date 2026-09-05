@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import concepts, papers
+from .api import concepts, papers, videos
 from .config import get_settings
 
 settings = get_settings()
@@ -22,6 +22,7 @@ app.add_middleware(
 
 app.include_router(papers.router, prefix="/api")
 app.include_router(concepts.router, prefix="/api")
+app.include_router(videos.router, prefix="/api")
 
 
 @app.get("/health", tags=["meta"])

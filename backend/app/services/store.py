@@ -22,15 +22,20 @@ class ConceptNotFoundError(KeyError):
 
 
 class PaperStore:
-    def __init__(self, upload_dir: Path):
+    def __init__(self, upload_dir: Path, videos_dir: Path | None = None):
         self.upload_dir = upload_dir
+        self.videos_dir = videos_dir or upload_dir.parent / "videos"
         self.upload_dir.mkdir(parents=True, exist_ok=True)
+        self.videos_dir.mkdir(parents=True, exist_ok=True)
         self._papers: dict[str, Paper] = {}
         self._pages: dict[str, list[PageText]] = {}
         self._concepts: dict[str, list[Concept]] = {}
 
     def pdf_path(self, paper_id: str) -> Path:
         return self.upload_dir / f"{paper_id}.pdf"
+
+    def video_path(self, concept_id: str) -> Path:
+        return self.videos_dir / f"{concept_id}.mp4"
 
     def save(self, paper: Paper, pages: list[PageText]) -> Paper:
         self._papers[paper.id] = paper
@@ -77,9 +82,21 @@ class PaperStore:
                 return concept
         raise ConceptNotFoundError(concept_id)
 
+    def set_video(self, paper_id: str, concept_id: str, url: str) -> Concept:
+        """Attach a rendered video to a concept, in place."""
+        concepts = self.concepts(paper_id)
+        for index, concept in enumerate(concepts):
+            if concept.id == concept_id:
+                updated = concept.model_copy(update={"video_url": url})
+                concepts[index] = updated
+                return updated
+        raise ConceptNotFoundError(concept_id)
+
     def delete(self, paper_id: str) -> None:
         if paper_id not in self._papers:
             raise PaperNotFoundError(paper_id)
+        for concept in self._concepts.get(paper_id, []):
+            self.video_path(concept.id).unlink(missing_ok=True)
         del self._papers[paper_id]
         self._pages.pop(paper_id, None)
         self._concepts.pop(paper_id, None)
@@ -95,5 +112,6 @@ def get_store() -> PaperStore:
     if _store is None:
         from ..config import get_settings
 
-        _store = PaperStore(get_settings().upload_dir)
+        settings = get_settings()
+        _store = PaperStore(settings.upload_dir, settings.videos_dir)
     return _store

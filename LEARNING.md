@@ -101,12 +101,70 @@ network.
 
 ---
 
-## Milestone 3 — First render *(next)*
+## Milestone 3 — First render
 
-**Plan:** a hand-written Manim scene, rendered by the backend as a subprocess,
-served as an mp4. No LLM involved — the point is to learn the render pipeline
-and its failure modes before adding a model that writes the code.
+**Built:** a `Renderer` seam, a Docker-backed manim renderer, a hand-written
+scene template, and two endpoints. Twelve new tests, one of which renders for
+real and skips itself when Docker is absent.
 
-**To find out:** how slow a render actually is, what manim needs installed
-(LaTeX is the painful one), and whether this has to move off the request path
-immediately or can wait for milestone 6.
+**Verified:** h264, 854x480, 15fps, 5.33s, 80 frames, 77 KB, rendered in 4.6s
+at `-ql` inside a container with no network.
+
+**Things I learned**
+
+- **The toolchain problem answered the security question.** There is no manim,
+  ffmpeg or LaTeX on this machine and installing them on Windows is grim, so
+  rendering went into a container. That accidentally solved milestone 4's real
+  problem: model-written Python now has a `--network none`, memory-capped,
+  CPU-quotaed box to run in, and it exists before any model writes a line.
+- **Killing `docker run` does not kill the container.** The daemon owns it. A
+  timeout has to `docker kill` by name, which is why every container gets one.
+- **`repr()`, not `json.dumps()`, for embedding text in generated Python.**
+  JSON escapes astral-plane characters as UTF-16 surrogate pairs, so an emoji
+  round-trips into Python as two lone surrogates rather than the character. A
+  test caught this; I would not have.
+- **Manim 0.19 ships no ffmpeg CLI.** It uses PyAV's bundled libav instead, so
+  `ffmpeg`/`ffprobe` are simply not in the image. Milestone 5 muxes audio and
+  cannot assume the CLI is there — either use PyAV or add ffmpeg to a derived
+  image.
+- **The image's PATH is not a login shell's PATH.** `docker run img sh -lc
+  "manim --version"` reports "not found" because `/etc/profile` resets PATH and
+  drops `/opt/venv/bin`. The direct invocation works fine. A probe that fails
+  is not proof the thing is missing.
+- **Rendering is fast at low quality and not at high.** 4.6s at `-ql` (480p15)
+  versus minutes at `-qh`. Blocking the request is survivable today and will
+  not be at milestone 5's clip counts.
+- **`Text`, not `MathTex`.** Pango accepts any string; LaTeX falls over on the
+  stray `%`, `&`, `_` and `$` that paper titles are full of.
+
+**Open questions for later**
+
+- Renders block the request. Fine for one 5-second card, untenable for a
+  multi-scene video. This is the whole of milestone 6.
+- Nothing caches. Re-rendering an unchanged concept costs a full container run;
+  a content hash would make it free.
+- The container mounts a host directory read-write. Milestone 4 should probably
+  tighten that to a read-only source mount plus a separate output volume.
+
+**Deliberate divergences from the reference project**
+
+- Renders are sandboxed. The reference executes model-written Python directly
+  on the host.
+- The render path is a seam with a stub, so the API is testable without a
+  2 GB image.
+- Render failures map to 502/504 and the stderr is deliberately not returned to
+  the client — it names host paths. From milestone 4 it becomes the model's
+  correction prompt instead.
+
+---
+
+## Milestone 4 — Generated animation *(next)*
+
+**Plan:** replace `build_scene()` with an LLM call, and add the correction
+loop: render, and on failure feed the captured stderr back to the model as the
+next prompt, up to N attempts. The seam is already in place — `RenderError`
+carries `stderr` precisely for this.
+
+**To find out:** how often the first attempt renders at all, whether the error
+text is actually useful to the model, and whether constraining generation to a
+small set of my own primitives beats letting it write raw Manim.
