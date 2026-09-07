@@ -346,3 +346,51 @@ Scene splitting, narration-driven timing, and the endpoint.
   network-isolated container as the renderer.
 - Narration sits behind a `Speech` protocol, so gTTS is a starting point rather
   than a commitment.
+
+---
+
+## Milestone 4, revisited
+
+Went back to the generation prompt once milestone 5 was wired up. Three
+changes, separated by how well justified each one is -- two are evidence, one
+is a guess, and the difference matters.
+
+**A real bug, and mine.** Milestone 5 left two contradictory length
+instructions in the same prompt: the system prompt said "keep the whole
+animation between 10 and 25 seconds" while the per-scene block said "must last
+about 7 seconds, because that is how long the narration takes". A model given
+both is given neither. Exactly one now reaches it -- the measured narration
+length when narration exists, a default range when it does not -- and a test
+asserts `"seconds" not in SYSTEM` so it cannot drift back.
+
+**The correction prompt was missing the point of the scene.** It carried the
+error and the code but never said what the code was *for*, which leaves a "fix"
+free to quietly animate something else. It now carries the plan the model wrote
+on its first attempt.
+
+**A prior, not a measurement.** I added a short list of known-good manim classes
+and methods to the system prompt. Hallucinated methods are the classic failure
+mode for generated manim, and the reference project ships a cheat sheet for
+exactly this -- but nothing in *my* runs has yet shown that this is what fails
+here. It is a reasonable guess dressed as a fix, and labelling it as one matters
+more than being right about it.
+
+**Things I learned**
+
+- **Wiring a later milestone can silently corrupt an earlier one.** Nothing
+  failed when milestone 5 introduced the contradiction. No test covered "how
+  many length instructions does the model receive", because until there were
+  two sources of that instruction the question was meaningless. New
+  collaborators create new invariants, and the old tests do not know about them.
+- **`str.format` ignores extra keyword arguments.** A botched edit left
+  `CORRECT.format(plan=...)` pointing at a template with no `{plan}` in it.
+  That is not an error, it is a silent no-op -- a change that looks applied,
+  passes every test, and does nothing.
+- **Measure before and after on the same input.** The baseline run was launched
+  before these edits, so it holds the old prompt against the same paper and the
+  same cached concepts: one variable. Without that, prompt changes are just
+  opinions with a diff attached.
+
+**Still unmeasured:** the first-attempt render rate, before or after. Three
+runs have now been lost to free-tier quota, a Docker daemon that was not
+running, and a Docker daemon that updated itself overnight.

@@ -45,10 +45,28 @@ and no internet to reach.
 from disk. Build everything from primitives.
 - Use `Text` for prose. Use `MathTex` only for actual mathematics, and keep \
 the LaTeX simple -- it is the most common cause of a failed render.
-- Keep the whole animation between 10 and 25 seconds.
-- Prefer `self.play(...)` with explicit `run_time`, and end with `self.wait(1.5)`.
+- Prefer `self.play(...)` with explicit `run_time`, and end on `self.wait(...)` \
+rather than a cut.
 - Position things relative to each other (`next_to`, `to_edge`, `shift`) rather \
-than with absolute coordinates, and keep everything inside the frame.\
+than with absolute coordinates, and keep everything inside the frame.
+
+Use only these, which are known to exist. Anything else risks a method that \
+does not:
+
+- Mobjects: `Text`, `MathTex`, `Circle`, `Square`, `Rectangle`, `Line`, \
+`Arrow`, `Dot`, `Axes`, `NumberLine`, `Brace`, `VGroup`, `SurroundingRectangle`
+- Animations: `Write`, `Create`, `FadeIn`, `FadeOut`, `Transform`, \
+`ReplacementTransform`, `GrowFromCenter`, `Indicate`, `MoveToTarget`
+- Positioning: `next_to`, `to_edge`, `shift`, `move_to`, `arrange`, \
+`set_color`, `scale`, `rotate`
+- Constants: `UP`, `DOWN`, `LEFT`, `RIGHT`, `ORIGIN`, and the colour names \
+(`BLUE`, `RED`, `YELLOW`, `GREEN`, `WHITE`, `GREY`)\
+"""
+
+# Appended only when nothing else fixes the length -- see TIMING, which wins
+# when narration exists and has been measured.
+DEFAULT_LENGTH = """
+Aim for 12 to 20 seconds in total.
 """
 
 GENERATE = """\
@@ -72,6 +90,9 @@ that, and end on a short wait rather than a cut.
 
 CORRECT = """\
 The code below failed. Fix it and return the complete corrected scene.
+
+What this scene is meant to show:
+{plan}
 
 The error:
 {error}
@@ -206,17 +227,29 @@ async def animate(
     outcome = AnimationOutcome(result=None)
     previous_code: Optional[str] = None
     previous_error: Optional[str] = None
+    # Carried into the correction prompt so a fix stays a fix. Without it the
+    # model is looking at a traceback and some code with no idea what the code
+    # was for, and is free to quietly animate something else.
+    previous_plan: str = ""
 
     for attempt in range(1, max_attempts + 1):
         prompt = (
-            CORRECT.format(error=previous_error, code=previous_code)
+            CORRECT.format(
+                plan=previous_plan or "(not recorded)",
+                error=previous_error,
+                code=previous_code,
+            )
             if previous_error
             else GENERATE.format(
                 brief=brief.prompt_block(),
+                # Exactly one length instruction reaches the model. Milestone 5
+                # briefly sent two -- a fixed 10-25s range in the system prompt
+                # and a measured target here -- which is a contradiction, not a
+                # constraint.
                 timing=(
                     TIMING.format(seconds=brief.target_seconds)
                     if brief.target_seconds
-                    else ""
+                    else DEFAULT_LENGTH
                 ),
             )
         )
@@ -237,6 +270,7 @@ async def animate(
             break
 
         outcome.plan = scene.plan
+        previous_plan = scene.plan or previous_plan
         code = _strip_fences(scene.code)
 
         try:

@@ -243,3 +243,49 @@ def test_check_rejects_two_scenes():
     )
     with pytest.raises(CodeRejected, match="Define exactly one"):
         check(code, SCENE_NAME)
+
+
+# --- prompt hygiene -------------------------------------------------------
+
+
+async def test_exactly_one_length_instruction_reaches_the_model(tmp_path):
+    """Milestone 5 briefly sent two, which is a contradiction not a constraint."""
+    from app.services.animation import SYSTEM, SceneBrief, animate
+
+    assert "seconds" not in SYSTEM, "length belongs in the per-scene prompt only"
+
+    llm, renderer = StubLLM([scene()]), StubRenderer()
+    brief = SceneBrief(
+        description="Show a circle.",
+        fallback_title="t",
+        fallback_body="b",
+        target_seconds=7.0,
+    )
+    await animate(llm, renderer, brief, tmp_path / "o.mp4", timeout=60)
+
+    prompt = llm.calls[0]["prompt"]
+    assert "about 7 seconds" in prompt
+    assert "12 to 20 seconds" not in prompt, "the measured target is the only target"
+
+
+async def test_without_narration_a_default_length_is_given(tmp_path):
+    llm, renderer = StubLLM([scene()]), StubRenderer()
+
+    await run(llm, renderer, tmp_path)
+
+    prompt = llm.calls[0]["prompt"]
+    assert "12 to 20 seconds" in prompt
+    assert "because that is how long" not in prompt, "there is no narration to fit"
+
+
+async def test_correction_prompt_carries_the_original_plan(tmp_path):
+    """A fix needs to know what the code was for, or it is free to drift."""
+    llm = StubLLM([scene(plan="Two vectors rotate apart."), scene()])
+    renderer = StubRenderer()
+    renderer.errors = [RenderError("boom", stderr="AttributeError: no 'nudge'")]
+
+    await run(llm, renderer, tmp_path)
+
+    correction = llm.calls[1]["prompt"]
+    assert "Two vectors rotate apart." in correction
+    assert "nudge" in correction
