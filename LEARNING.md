@@ -709,3 +709,19 @@ upload panel that fades and grows in over the first two seconds.
   and timing were taken from the screenshot; every line of code is new.
 - **The interior had to be dimmed after the first screenshot.** Text and
   panels sit on the sphere; the rim is what should read, not the body.
+
+### Choosing the background
+
+Asked for alternatives, I built five looks into one shader behind a `?bg=`
+switch and screenshotted each, the same way the voices were compared: make
+the options real, let a person choose by eye, then make the choice the
+default. *Ring* won -- a single glowing circle with a chromatic edge and a
+slow bright arc. It keeps what makes the reference feel expensive, drops the
+busy interior so text reads, and a circle is the most 3blue1brown thing to
+put behind the word "Pi". The other four stay reachable by query parameter,
+which costs nothing and means the next opinion can be tested in a URL.
+
+One bug worth remembering: a backtick inside a GLSL comment ended the
+JavaScript template literal early. TypeScript reported the error on a line
+that looked like perfectly good GLSL, because from its point of view the
+string had already closed.

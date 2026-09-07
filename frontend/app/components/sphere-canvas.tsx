@@ -7,11 +7,13 @@ import { useEffect, useRef } from "react";
 // touch of chromatic split, fade and grow in over the intro, then move very
 // slowly. Contrast stays low because text and panels sit on top.
 //
-//   glass   a refractive orb -- the default
+//   ring    a thin luminous lens ring -- the default, chosen by eye
+//   glass   a refractive orb, closest to the reference
 //   chrome  the same orb as liquid metal: smooth bands, hard highlights
 //   smoke   no orb; slow ink rising through a soft spotlight
-//   ring    a thin luminous lens ring, the most minimal
 //   horizon a perspective grid running to a glowing horizon
+//
+// The others stay reachable with ?bg= on the landing page.
 
 export type BackgroundVariant = "glass" | "chrome" | "smoke" | "ring" | "horizon";
 const VARIANT_INDEX: Record<BackgroundVariant, number> = {

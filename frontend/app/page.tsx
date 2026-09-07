@@ -31,9 +31,11 @@ export default async function Home({
   searchParams: Promise<{ bg?: string }>;
 }) {
   const { bg } = await searchParams;
+  // Ring by default: a single glowing circle is the most 3blue1brown thing
+  // to put behind the word "Pi", and it leaves the text easiest to read.
   const variant = VARIANTS.includes(bg as BackgroundVariant)
     ? (bg as BackgroundVariant)
-    : "glass";
+    : "ring";
 
   return (
     <div className="relative min-h-screen overflow-hidden">
