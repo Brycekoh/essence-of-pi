@@ -658,3 +658,27 @@ that was already tested; what this proved is that the wiring to a real
 **Types are kept by hand.** Six interfaces mirroring the pydantic models.
 Reading them is faster than reading a generator's output, and they drift only
 when the API does -- which is when a person should be looking anyway.
+
+### The design pass
+
+The first cut was functional and plain, and the reaction was "why not make
+it really cool like the original". Fair. A second pass added a hand-written
+WebGL shader background, a landing page, glass panels and staggered
+entrances.
+
+- **Function first, then form -- in that order, verified.** The plain version
+  was tested end to end in a browser (upload, extract, build with live
+  progress, play) and committed *before* any styling. A pretty UI over a
+  broken pipe is worse than an ugly one over a working pipe, because it hides
+  the break.
+- **The shader is ~80 lines of GLSL, not a library.** Domain-warped value
+  noise in the palette the videos use, plus the faint coordinate grid every
+  3blue1brown scene sits on. Rendered at 75% resolution, one still frame
+  under `prefers-reduced-motion`, paused when the tab is hidden. The CSS
+  background underneath is the fallback if WebGL is missing.
+- **No animation library.** Two CSS keyframes and an inline `animation-delay`
+  per card do the staggered entrances. The reference project pulled in
+  framer-motion for the same effect; that is a dependency for a `transform`.
+- **Low contrast is the point.** The background sits behind text on every
+  page. It has to read as texture, not content, so every colour is mixed at
+  10 to 35 percent.

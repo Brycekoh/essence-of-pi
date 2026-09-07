@@ -20,22 +20,29 @@ export function PaperList() {
   if (papers === null) return <p className="text-sm text-muted">Loading…</p>;
   if (papers.length === 0)
     return (
-      <p className="text-sm text-muted">
+      <p className="glass rounded-xl px-4 py-3 text-sm text-muted">
         Nothing yet. The store is in memory, so a backend restart clears it.
       </p>
     );
 
   return (
-    <ul className="divide-y divide-line rounded-lg border border-line bg-panel">
-      {papers.map((p) => (
-        <li key={p.id}>
+    <ul className="grid gap-3 sm:grid-cols-2">
+      {papers.map((p, i) => (
+        <li
+          key={p.id}
+          className="animate-rise"
+          style={{ animationDelay: `${i * 60}ms` }}
+        >
           <Link
             href={`/papers/${p.id}`}
-            className="flex items-baseline justify-between gap-4 px-4 py-3 hover:bg-panel-2"
+            className="glass group flex h-full flex-col justify-between gap-3 rounded-xl p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/40"
           >
-            <span className="truncate">{p.title ?? p.filename}</span>
-            <span className="shrink-0 text-xs text-muted">
-              {p.page_count} pages
+            <span className="line-clamp-2 leading-snug group-hover:text-accent">
+              {p.title ?? p.filename}
+            </span>
+            <span className="flex items-baseline justify-between text-xs text-muted">
+              <span>{p.page_count} pages</span>
+              <span>{new Date(p.uploaded_at).toLocaleDateString()}</span>
             </span>
           </Link>
         </li>

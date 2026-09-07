@@ -15,9 +15,11 @@ type State =
 export function ConceptCard({
   index,
   concept,
+  delay = 0,
 }: {
   index: number;
   concept: Concept;
+  delay?: number;
 }) {
   const [state, setState] = useState<State>(
     // A concept that already has a video shows it straight away. The URL gets
@@ -67,23 +69,65 @@ export function ConceptCard({
     }
   }
 
+  const building = state.kind === "building";
+
   return (
-    <li className="rounded-lg border border-line bg-panel p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-xs text-muted">
-            {index} · pages {concept.source_pages.join(", ") || "—"}
-          </p>
-          <h3 className="text-base font-semibold">{concept.name}</h3>
-          <p className="mt-1 text-sm text-fg/90">{concept.summary}</p>
+    <li
+      className={`glass animate-rise rounded-2xl p-5 transition-all duration-300
+        ${building ? "border-accent/40" : "hover:border-accent/30"}`}
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <div className="flex items-start gap-4">
+        {/* Index badge: the ordering is meaningful, prerequisites come first. */}
+        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-accent-dim font-mono text-xs text-accent">
+          {index}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold leading-snug">{concept.name}</h3>
+              <p className="mt-0.5 text-xs text-muted">
+                pages {concept.source_pages.join(", ") || "—"}
+              </p>
+            </div>
+
+            {state.kind === "idle" && (
+              <button
+                onClick={build}
+                className="shrink-0 rounded-lg bg-accent px-3.5 py-1.5 text-sm font-medium text-bg transition hover:brightness-110"
+              >
+                Build video
+              </button>
+            )}
+            {state.kind === "failed" && (
+              <button
+                onClick={build}
+                className="shrink-0 rounded-lg border border-line px-3.5 py-1.5 text-sm text-muted transition hover:border-accent/40 hover:text-fg"
+              >
+                Try again
+              </button>
+            )}
+            {state.kind === "done" && (
+              <button
+                onClick={build}
+                className="shrink-0 text-xs text-muted transition hover:text-accent"
+                title="Generate a new version"
+              >
+                rebuild
+              </button>
+            )}
+          </div>
+
+          <p className="mt-2 text-sm leading-relaxed text-fg/90">{concept.summary}</p>
           <button
             onClick={() => setOpen((o) => !o)}
-            className="mt-1 text-xs text-muted hover:text-fg"
+            className="mt-1.5 text-xs text-muted transition hover:text-accent"
           >
-            {open ? "less" : "more"}
+            {open ? "less ↑" : "more ↓"}
           </button>
           {open && (
-            <div className="mt-2 space-y-2 text-sm text-muted">
+            <div className="animate-fade mt-3 space-y-2 border-l border-line pl-3 text-sm text-muted">
               <p>{concept.explanation}</p>
               {concept.prerequisites.length > 0 && (
                 <p>
@@ -97,51 +141,25 @@ export function ConceptCard({
               </p>
             </div>
           )}
-        </div>
 
-        {state.kind === "idle" && (
-          <button
-            onClick={build}
-            className="shrink-0 rounded-md border border-accent-dim px-3 py-1.5 text-sm text-accent hover:bg-panel-2"
-          >
-            Build video
-          </button>
-        )}
-        {state.kind === "failed" && (
-          <button
-            onClick={build}
-            className="shrink-0 rounded-md border border-line px-3 py-1.5 text-sm text-muted hover:bg-panel-2"
-          >
-            Try again
-          </button>
-        )}
-        {state.kind === "done" && (
-          <button
-            onClick={build}
-            className="shrink-0 text-xs text-muted hover:text-fg"
-            title="Generate a new version"
-          >
-            rebuild
-          </button>
-        )}
+          {building && (
+            <div className="mt-4">
+              <Progress events={state.events} />
+            </div>
+          )}
+          {state.kind === "failed" && (
+            <p className="mt-3 text-sm text-bad">{state.message}</p>
+          )}
+          {state.kind === "done" && (
+            <video
+              className="animate-fade mt-4 w-full shadow-2xl shadow-black/50"
+              controls
+              preload="metadata"
+              src={state.src}
+            />
+          )}
+        </div>
       </div>
-
-      {state.kind === "building" && (
-        <div className="mt-4">
-          <Progress events={state.events} />
-        </div>
-      )}
-      {state.kind === "failed" && (
-        <p className="mt-3 text-sm text-bad">{state.message}</p>
-      )}
-      {state.kind === "done" && (
-        <video
-          className="mt-4 w-full"
-          controls
-          preload="metadata"
-          src={state.src}
-        />
-      )}
     </li>
   );
 }

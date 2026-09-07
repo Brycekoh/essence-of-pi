@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
+import { ShaderBackground } from "./components/shader-background";
 
 export const metadata: Metadata = {
   title: "Essence of Pi",
@@ -13,17 +14,22 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen">
-        <header className="border-b border-line">
-          <div className="mx-auto flex max-w-4xl items-baseline gap-4 px-6 py-4">
-            <Link href="/" className="text-lg font-semibold text-accent">
-              Essence of Pi
+        <ShaderBackground />
+        <header className="sticky top-0 z-20 border-b border-line/60 bg-bg/60 backdrop-blur-md">
+          <div className="mx-auto flex max-w-5xl items-baseline gap-4 px-6 py-3.5">
+            <Link href="/" className="flex items-baseline gap-2">
+              <span className="text-xl leading-none text-accent">π</span>
+              <span className="wordmark text-lg">Essence of Pi</span>
             </Link>
-            <span className="text-sm text-muted">
-              research papers, distilled into explainer videos
+            <span className="hidden text-sm text-muted sm:inline">
+              papers → concepts → explainer videos
             </span>
           </div>
         </header>
-        <main className="mx-auto max-w-4xl px-6 py-8">{children}</main>
+        <main className="mx-auto max-w-5xl px-6 py-10">{children}</main>
+        <footer className="mx-auto max-w-5xl px-6 pb-10 pt-6 text-xs text-muted/70">
+          Built with manim, ffmpeg and Kokoro, all running locally. Concepts by Gemini.
+        </footer>
       </body>
     </html>
   );

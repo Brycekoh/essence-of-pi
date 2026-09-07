@@ -42,10 +42,15 @@ export function Uploader() {
           const file = e.dataTransfer.files[0];
           if (file) send(file);
         }}
-        className={`cursor-pointer rounded-lg border-2 border-dashed p-10 text-center transition
-          ${dragging ? "border-accent bg-panel-2" : "border-line bg-panel hover:border-accent-dim"}
-          ${busy ? "pointer-events-none opacity-60" : ""}`}
+        className={`glass group relative cursor-pointer rounded-2xl p-10 text-center transition-all duration-300
+          ${dragging ? "scale-[1.01] border-accent/70" : "hover:border-accent/40"}
+          ${busy ? "pointer-events-none" : ""}`}
       >
+        {/* Dashed inner ring, so it reads as a drop target without a heavy border. */}
+        <div
+          className={`pointer-events-none absolute inset-3 rounded-xl border border-dashed transition-colors
+            ${dragging ? "border-accent/70" : "border-line group-hover:border-accent-dim"}`}
+        />
         <input
           ref={input}
           type="file"
@@ -57,15 +62,21 @@ export function Uploader() {
           }}
         />
         {busy ? (
-          <p className="text-muted">Reading the PDF…</p>
+          <div className="space-y-2">
+            <p className="animate-glow text-accent">Reading the PDF…</p>
+            <p className="text-xs text-muted">text extraction, a few seconds</p>
+          </div>
         ) : (
-          <>
-            <p className="text-fg">Drop a PDF here, or click to choose one</p>
-            <p className="mt-1 text-sm text-muted">Up to 25 MB</p>
-          </>
+          <div className="space-y-2">
+            <p className="text-3xl leading-none text-accent/80">↑</p>
+            <p className="text-base">
+              Drop a PDF here, or <span className="text-accent">choose one</span>
+            </p>
+            <p className="text-xs text-muted">Research papers work best · up to 25 MB</p>
+          </div>
         )}
       </div>
-      {error && <p className="mt-2 text-sm text-bad">{error}</p>}
+      {error && <p className="mt-3 text-center text-sm text-bad">{error}</p>}
     </div>
   );
 }
