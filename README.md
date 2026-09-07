@@ -10,6 +10,21 @@ of them into a short narrated animation.
 > paper list is empty. This is a learning build, in public, one milestone per
 > commit; [LEARNING.md](LEARNING.md) is the running log, including the mistakes.
 
+## Demo
+
+<div align="center">
+  <a href="media/demo.mp4">
+    <img src="media/demo.gif" alt="Internal Covariate Shift, generated from the Batch Normalization paper" width="640">
+  </a>
+  <br>
+  <em><a href="media/demo.mp4">▶ Watch with sound</a> — the GIF is silent, and half the point is the narration.</em>
+</div>
+
+Generated from [Batch Normalization](https://arxiv.org/abs/1502.03167) (11 pages)
+with no human input beyond dropping the PDF in: the model chose the concept,
+split it into three scenes, wrote the narration, wrote the Manim, and all three
+scenes rendered on the first attempt. 38 seconds of video, 89 seconds to build.
+
 ## How it works
 
 ```
