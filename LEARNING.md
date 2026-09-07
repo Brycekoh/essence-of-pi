@@ -277,7 +277,7 @@ there is quota to spend.
 
 ---
 
-## Milestone 5 — Narration *(in progress)*
+## Milestone 5 — Narration
 
 **Built so far:** the LLM-free half. A `Speech` seam with gTTS behind it, a
 `MediaTool` seam with ffmpeg behind it (probe, mux, concat), a derived Docker
@@ -314,12 +314,31 @@ muxing and concatenation.
   need no checked-in fixtures -- the same instinct as the hand-written PDF
   writer in milestone 1.
 
-**Still to do in this milestone**
+### Part 2 — the ordering
 
-- Split a concept into several scenes.
-- Generate narration per scene, then drive `self.wait()` and `run_time` from
-  its measured duration.
-- Wire it into the endpoint, replacing the single-clip render.
+Scene splitting, narration-driven timing, and the endpoint.
+
+- **The order is the design.** A concept is split into scenes, every scene's
+  narration is synthesised and measured *first*, and only then is animation
+  code written — with the measured length in the prompt. Part 1 proved why:
+  animation-then-narration gave 5.3s of video under 13.7s of speech.
+- **Narration is generated concurrently, animation is not.** TTS is
+  network-bound and independent per scene; rendering is the slow part and
+  competes for the same CPU.
+- **A failed scene is skipped, not fatal.** One scene that will not render
+  should not lose the other three. Its fallback card carries that scene's own
+  narration, so the video still *says* the right thing even when it cannot
+  show it.
+- **A test caught a leak I had claimed did not exist.** Since milestone 4 the
+  502 body serialised whole attempt objects, and `detail` is distilled renderer
+  stderr — paths and all. I had asserted "stderr never reaches the client" in
+  milestone 3, dropped that assertion when rewriting the test for milestone 4,
+  and the leak walked in behind it. Scene reports now carry outcomes only, and
+  the assertion is back. Deleting a test is how a guarantee quietly stops being
+  one.
+- **Quota is now the design constraint, not an annoyance.** One split call plus
+  up to three per scene means a three-scene video can cost ten requests against
+  a twenty-per-day-per-model budget. `max_scenes` is the main lever.
 
 **Deliberate divergences from the reference project**
 

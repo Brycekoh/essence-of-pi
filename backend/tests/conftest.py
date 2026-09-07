@@ -1,11 +1,13 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import provide_llm, provide_renderer
+from app.api.deps import provide_llm, provide_media, provide_renderer, provide_speech
 from app.config import Settings, get_settings
 from app.main import app
 from app.services.llm import StubLLM
+from app.services.media import StubMedia
 from app.services.render import StubRenderer
+from app.services.speech import StubSpeech
 from app.services.store import PaperStore, get_store
 
 from .pdf_fixture import make_pdf
@@ -34,7 +36,19 @@ def stub_renderer() -> StubRenderer:
 
 
 @pytest.fixture
-def client(settings, stub_llm, stub_renderer):
+def stub_speech() -> StubSpeech:
+    """Narration without the network."""
+    return StubSpeech()
+
+
+@pytest.fixture
+def stub_media() -> StubMedia:
+    """ffmpeg without Docker."""
+    return StubMedia()
+
+
+@pytest.fixture
+def client(settings, stub_llm, stub_renderer, stub_speech, stub_media):
     """A TestClient with storage and the LLM pointed at test doubles.
 
     Overriding dependencies instead of monkeypatching globals is what keeps
@@ -46,6 +60,8 @@ def client(settings, stub_llm, stub_renderer):
     app.dependency_overrides[get_store] = lambda: store
     app.dependency_overrides[provide_llm] = lambda: stub_llm
     app.dependency_overrides[provide_renderer] = lambda: stub_renderer
+    app.dependency_overrides[provide_speech] = lambda: stub_speech
+    app.dependency_overrides[provide_media] = lambda: stub_media
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

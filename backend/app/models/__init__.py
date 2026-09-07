@@ -1,6 +1,6 @@
 from .concept import Concept, ConceptDraft, ConceptExtraction
 from .paper import Paper, PageText, PaperSummary, PaperText
-from .scene import ManimScene, RenderAttempt
+from .scene import ManimScene, RenderAttempt, SceneSpec, SceneSplit
 
 __all__ = [
     "Concept",
@@ -12,4 +12,6 @@ __all__ = [
     "PageText",
     "PaperText",
     "RenderAttempt",
+    "SceneSpec",
+    "SceneSplit",
 ]

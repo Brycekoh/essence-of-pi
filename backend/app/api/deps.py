@@ -11,8 +11,12 @@ from fastapi import Depends, HTTPException, status
 from ..config import Settings, get_settings
 from ..services.llm import LLMNotConfigured, build_llm
 from ..services.llm.base import LLMClient
+from ..services.media import build_media
+from ..services.media.base import MediaTool
 from ..services.render import build_renderer
 from ..services.render.base import Renderer
+from ..services.speech import build_speech
+from ..services.speech.base import Speech
 
 
 def provide_llm(settings: Settings = Depends(get_settings)) -> LLMClient:
@@ -32,6 +36,21 @@ def provide_renderer(settings: Settings = Depends(get_settings)) -> Renderer:
     return build_renderer(
         settings.renderer_image,
         settings.render_quality,
+        settings.render_memory,
+        settings.render_cpus,
+        settings.renderer_docker_bin,
+    )
+
+
+def provide_speech(settings: Settings = Depends(get_settings)) -> Speech:
+    """Narration. gTTS needs no key, so there is nothing to fail on here."""
+    return build_speech(settings.speech_lang, settings.speech_tld)
+
+
+def provide_media(settings: Settings = Depends(get_settings)) -> MediaTool:
+    """ffmpeg, in the same image and the same sandbox as the renderer."""
+    return build_media(
+        settings.renderer_image,
         settings.render_memory,
         settings.render_cpus,
         settings.renderer_docker_bin,

@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from app.models import ConceptExtraction, ManimScene
+from app.models import ConceptExtraction, ManimScene, SceneSpec, SceneSplit
 from app.scenes import SCENE_NAME, build_scene
 from app.scenes.title_card import _literal, _wrap
 from app.services.render import ManimDockerRenderer, RenderError, RenderTimeout
@@ -27,6 +27,19 @@ def scene(code: str = GOOD_CODE, plan: str = "A word appears.") -> ManimScene:
     return ManimScene(plan=plan, code=code)
 
 
+def split(*narrations: str) -> SceneSplit:
+    return SceneSplit(
+        scenes=[SceneSpec(narration=n, visual="show it") for n in narrations]
+    )
+
+
+def queue_video(stub_llm, *narrations: str) -> None:
+    """One split call, then one generation call per scene."""
+    stub_llm.queue(split(*narrations))
+    for _ in narrations:
+        stub_llm.queue(scene())
+
+
 @pytest.fixture
 def rendered(client, sample_pdf, stub_llm):
     """A paper with one extracted concept, ready to render."""
@@ -39,17 +52,19 @@ def rendered(client, sample_pdf, stub_llm):
 # --- the endpoint ---------------------------------------------------------
 
 
-def test_render_produces_a_playable_url(client, rendered, stub_llm):
+def test_render_produces_a_playable_url(client, rendered, stub_llm, stub_speech):
     paper_id, concept_id = rendered
-    stub_llm.queue(scene())
+    queue_video(stub_llm, "First line.", "Second line.")
 
     response = client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
     assert response.status_code == 201, response.text
 
     body = response.json()
-    assert body["generated"] is True
-    assert body["plan"] == "A word appears."
-    assert [a["outcome"] for a in body["attempts"]] == ["rendered"]
+    assert body["generated_scenes"] == 2
+    assert [s["index"] for s in body["scenes"]] == [1, 2]
+    assert [s["narration"] for s in body["scenes"]] == ["First line.", "Second line."]
+    assert body["scenes"][0]["attempts"] == ["rendered"], "outcomes only, no stderr"
+    assert stub_speech.said == ["First line.", "Second line."], "every scene narrated"
     assert body["video_url"].endswith(f"/concepts/{concept_id}/video")
 
     video = client.get(body["video_url"])
@@ -67,7 +82,7 @@ def test_video_is_404_until_rendered(client, rendered):
 
 def test_render_attaches_the_url_to_the_concept(client, rendered, stub_llm):
     paper_id, concept_id = rendered
-    stub_llm.queue(scene())
+    queue_video(stub_llm, "One line.")
     assert client.get(f"/api/papers/{paper_id}/concepts/{concept_id}").json()["video_url"] is None
 
     client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
@@ -76,16 +91,20 @@ def test_render_attaches_the_url_to_the_concept(client, rendered, stub_llm):
     assert concept["video_url"].endswith(f"/concepts/{concept_id}/video")
 
 
-def test_every_attempt_failing_is_502(client, rendered, stub_llm, stub_renderer):
-    """Three model calls, three failed renders, a failed fallback, then 502."""
+def test_every_scene_failing_is_502_with_the_scene_reports(client, rendered, stub_llm, stub_renderer):
+    """Nothing rendered and nothing to concatenate, so 502 -- with diagnostics."""
     paper_id, concept_id = rendered
-    for _ in range(3):
+    queue_video(stub_llm, "One line.", "Two line.")
+    for _ in range(4):  # enough corrections for both scenes
         stub_llm.queue(scene())
     stub_renderer.error = RenderError("manim exited with code 1", stderr="boom", exit_code=1)
 
     response = client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
     assert response.status_code == 502
-    assert len(stub_llm.calls) == 4, "one concept extraction, then three attempts"
+    # The outcomes are ours to share; the detail behind them is distilled
+    # renderer stderr and names paths inside the image.
+    assert "render-failed" in response.text
+    assert "boom" not in response.text, "renderer stderr never reaches the client"
 
 
 def test_unknown_ids_are_404_before_any_model_call(client, rendered, stub_llm):
@@ -102,7 +121,7 @@ def test_unknown_paper_is_404(client):
 
 def test_deleting_a_paper_removes_its_videos(client, rendered, settings, stub_llm):
     paper_id, concept_id = rendered
-    stub_llm.queue(scene())
+    queue_video(stub_llm, "One line.")
     client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
     video = settings.videos_dir / f"{concept_id}.mp4"
     assert video.exists()

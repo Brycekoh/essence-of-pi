@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     # --- Narration (milestone 5) ---
     # gTTS needs no key and no quota, which after milestone 4 counts for a lot.
     # tld changes the accent: com (US), co.uk, com.au.
+    # Scenes per concept. Each one costs a model call (plus corrections), so
+    # this is the main lever on how fast a free-tier quota disappears.
+    max_scenes: int = 3
+
     speech_lang: str = "en"
     speech_tld: str = "com"
 

@@ -34,3 +34,35 @@ class RenderAttempt(BaseModel):
     attempt: int
     outcome: str  # "rendered" | "invalid-code" | "render-failed" | "timeout"
     detail: str = ""
+
+
+class SceneSpec(BaseModel):
+    """One beat of an explainer: what is said, and what is shown while it is said.
+
+    `narration` is declared first deliberately. The spoken line is what fixes
+    the scene's length -- it is synthesised and measured before any animation
+    code is written, so the visual is built to fit the words rather than the
+    words being padded to fit the visual.
+    """
+
+    narration: str = Field(
+        ...,
+        description=(
+            "One to three sentences of spoken narration, in plain spoken "
+            "English. No formulas read aloud symbol by symbol, no bullet "
+            "points, no stage directions."
+        ),
+    )
+    visual: str = Field(
+        ...,
+        description=(
+            "What is on screen while that line is spoken: the objects, what "
+            "moves, and what the viewer should notice. One or two sentences."
+        ),
+    )
+
+
+class SceneSplit(BaseModel):
+    """A concept broken into an ordered sequence of scenes."""
+
+    scenes: list[SceneSpec]

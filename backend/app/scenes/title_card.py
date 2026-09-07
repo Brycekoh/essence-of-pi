@@ -71,13 +71,20 @@ def _wrap(text: str, width: int = 52, max_lines: int = 5) -> list[str]:
     return lines
 
 
-def build_scene(concept: Concept) -> tuple[str, str]:
-    """Return (manim source, scene name) for a concept's title card."""
-    title = " ".join(concept.name.split())[:60] or "Untitled concept"
-    body = concept.summary.strip() or concept.explanation.strip()
+def build_card(title: str, body: str) -> tuple[str, str]:
+    """Return (manim source, scene name) for a title card.
 
+    Takes plain strings rather than a Concept so the same card can back a
+    failed *scene* as well as a failed concept.
+    """
+    heading = " ".join(title.split())[:60] or "Untitled concept"
     code = _TEMPLATE.format(
-        title=_literal(title),
+        title=_literal(heading),
         body_lines=_literal(_wrap(body)),
     )
     return code, SCENE_NAME
+
+
+def build_scene(concept: Concept) -> tuple[str, str]:
+    """Return (manim source, scene name) for a concept's title card."""
+    return build_card(concept.name, concept.summary.strip() or concept.explanation.strip())

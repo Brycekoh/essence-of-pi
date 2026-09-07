@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..models import Concept, ManimScene, RenderAttempt
-from ..scenes import build_scene as build_title_card
+from ..scenes import build_card
 from . import codecheck
 from .llm.base import LLMClient, LLMError
 from .render.base import Renderer, RenderError, RenderResult, RenderTimeout
@@ -30,7 +30,7 @@ from .render.base import Renderer, RenderError, RenderResult, RenderTimeout
 SCENE_NAME = "ConceptScene"
 
 SYSTEM = f"""\
-You write Manim Community v0.19 scenes in the visual idiom of 3blue1brown: \
+You write Manim Community v0.21 scenes in the visual idiom of 3blue1brown: \
 dark background, few elements on screen at once, one idea developed at a time, \
 motion that carries meaning rather than decoration.
 
@@ -52,16 +52,22 @@ than with absolute coordinates, and keep everything inside the frame.\
 """
 
 GENERATE = """\
-Animate this concept from a research paper.
+Animate this.
 
-Name: {name}
-Summary: {summary}
-Explanation: {explanation}
-What the animation should show: {visual_hint}
+{brief}
+{timing}
+Show the mechanism, not a list of bullet points. If it is a process, animate \
+the steps in order. If it is a relationship, show the two things and what \
+connects them.\
+"""
 
-Show the mechanism, not a list of bullet points. If the concept is a process, \
-animate the steps in order. If it is a relationship, show the two things and \
-what connects them.\
+# Only present when narration exists. The speech has already been synthesised
+# and measured by this point, so the animation is built to fit the words rather
+# than the words being padded to fit the animation.
+TIMING = """
+The animation must last about {seconds:.0f} seconds, because that is how long \
+the narration takes to speak. Choose run_times and waits that add up to roughly \
+that, and end on a short wait rather than a cut.
 """
 
 CORRECT = """\
@@ -84,6 +90,24 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _BOX = "│┃┏┐┓└┗┛║╔╗╚╝─━═╭╮╯╰╌╡╨┤├┬┴┼"
 _POINTER = "❱"  # rich's "this is the failing line" marker
 _ERROR_BUDGET = 1_800
+
+
+@dataclass
+class SceneBrief:
+    """What one scene needs, independent of whether it came from a concept.
+
+    `fallback_title` / `fallback_body` back the title card that renders when
+    generation fails, so a failed *scene* degrades exactly like a failed
+    concept does.
+    """
+
+    description: str
+    fallback_title: str
+    fallback_body: str
+    target_seconds: float | None = None
+
+    def prompt_block(self) -> str:
+        return self.description
 
 
 @dataclass
@@ -130,6 +154,22 @@ def distil_error(text: str, budget: int = _ERROR_BUDGET) -> str:
     return f"{headline}\n...\n{body[-room:]}" if room > 0 else headline[:budget]
 
 
+def brief_for_concept(concept: Concept) -> SceneBrief:
+    """The milestone-4 shape: one scene for a whole concept, no narration."""
+    return SceneBrief(
+        description="\n".join(
+            [
+                f"Name: {concept.name}",
+                f"Summary: {concept.summary}",
+                f"Explanation: {concept.explanation}",
+                f"What the animation should show: {concept.visual_hint}",
+            ]
+        ),
+        fallback_title=concept.name,
+        fallback_body=concept.summary.strip() or concept.explanation.strip(),
+    )
+
+
 async def animate_concept(
     llm: LLMClient,
     renderer: Renderer,
@@ -140,7 +180,29 @@ async def animate_concept(
     timeout: float = 300.0,
     fallback: bool = True,
 ) -> AnimationOutcome:
-    """Run the generate-render-correct loop for one concept."""
+    """Run the generate-render-correct loop for one whole concept."""
+    return await animate(
+        llm,
+        renderer,
+        brief_for_concept(concept),
+        destination,
+        max_attempts=max_attempts,
+        timeout=timeout,
+        fallback=fallback,
+    )
+
+
+async def animate(
+    llm: LLMClient,
+    renderer: Renderer,
+    brief: SceneBrief,
+    destination: Path,
+    *,
+    max_attempts: int = 3,
+    timeout: float = 300.0,
+    fallback: bool = True,
+) -> AnimationOutcome:
+    """Run the generate-render-correct loop for one scene."""
     outcome = AnimationOutcome(result=None)
     previous_code: Optional[str] = None
     previous_error: Optional[str] = None
@@ -150,10 +212,12 @@ async def animate_concept(
             CORRECT.format(error=previous_error, code=previous_code)
             if previous_error
             else GENERATE.format(
-                name=concept.name,
-                summary=concept.summary,
-                explanation=concept.explanation,
-                visual_hint=concept.visual_hint,
+                brief=brief.prompt_block(),
+                timing=(
+                    TIMING.format(seconds=brief.target_seconds)
+                    if brief.target_seconds
+                    else ""
+                ),
             )
         )
 
@@ -223,19 +287,19 @@ async def animate_concept(
         return outcome
 
     if fallback:
-        outcome.result = await _render_title_card(renderer, concept, destination, timeout)
+        outcome.result = await _render_title_card(renderer, brief, destination, timeout)
     return outcome
 
 
 async def _render_title_card(
-    renderer: Renderer, concept: Concept, destination: Path, timeout: float
+    renderer: Renderer, brief: SceneBrief, destination: Path, timeout: float
 ) -> Optional[RenderResult]:
     """Last resort: the hand-written card from milestone 3.
 
     It has rendered thousands of times without failing, which is exactly what a
     fallback needs to be.
     """
-    code, scene_name = build_title_card(concept)
+    code, scene_name = build_card(brief.fallback_title, brief.fallback_body)
     try:
         return await renderer.render(
             code=code, scene_name=scene_name, destination=destination, timeout=timeout

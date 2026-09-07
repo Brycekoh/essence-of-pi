@@ -13,10 +13,20 @@ each one become a short animated video.
 ## What works today
 
 ```
-PDF → pdfplumber → LLM concepts → LLM writes Manim → static check → render in Docker
-                                        ▲                                │
-                                        └──── the error, on failure ─────┘
+PDF → pdfplumber → LLM concepts → split into scenes
+                                        │
+                    ┌───────────────────┴───────────────────┐
+                    │  per scene:  narrate → MEASURE it     │
+                    │              → animate to that length │
+                    │              → render → mux audio     │
+                    └───────────────────┬───────────────────┘
+                                        └──► concatenate → mp4
 ```
+
+A failed render hands its own stderr back to the model as the next prompt, up
+to three attempts, then degrades to a title card carrying that scene's
+narration. A scene that cannot be built is skipped rather than sinking the
+video.
 
 | Method | Route | Does |
 | --- | --- | --- |
@@ -29,7 +39,7 @@ PDF → pdfplumber → LLM concepts → LLM writes Manim → static check → re
 | `POST` | `/api/papers/{id}/concepts` | Extract concepts with an LLM (replaces any previous set) |
 | `GET` | `/api/papers/{id}/concepts` | Concepts extracted so far |
 | `GET` | `/api/papers/{id}/concepts/{cid}` | One concept |
-| `POST` | `/api/papers/{id}/concepts/{cid}/video` | Model writes an animation; render it, correcting on failure |
+| `POST` | `/api/papers/{id}/concepts/{cid}/video` | Build a narrated, multi-scene explainer for this concept |
 | `GET` | `/api/papers/{id}/concepts/{cid}/video` | Stream the rendered mp4 |
 | `GET` | `/health` | Liveness check |
 
@@ -107,9 +117,8 @@ docker compose up --build
       and served as an mp4.
 - [x] **4 — Generated animation.** The LLM writes the Manim code; failed renders
       feed their own stderr back in for a correction pass.
-- [~] **5 — Narration.** *In progress.* Speech and media seams built and
-      tested against real ffmpeg; not yet wired to the endpoints. Scene timing
-      from audio length is the remaining piece.
+- [x] **5 — Narration.** Concepts split into scenes; each is narrated,
+      measured, animated to that measured length, muxed and concatenated.
 - [ ] **6 — Concurrency and progress.** A real job queue, parallel renders, live
       progress in the UI.
 - [ ] **7 — Frontend.** Next.js: upload, browse concepts, watch clips.
@@ -167,6 +176,13 @@ Decisions made in milestone 1 that the later milestones depend on:
   On its first contact with reality this was the only thing that worked: the
   provider refused every generation request, and 6/6 concepts still returned a
   playable video.
+- **Narration is synthesised before the animation is written.** The speech
+  is measured, and its length becomes the animation's target — the reverse
+  order produced 5.3s of video under 13.7s of speech, which meant holding a
+  dead frame for eight seconds. Padding is the safety net, not the plan.
+- **Diagnostics stop at the API boundary.** Scene reports carry attempt
+  *outcomes*; the detail behind them is distilled renderer stderr, written for
+  the model and the server log, never for an HTTP client.
 - **Retrying is not free when the quota counts requests.** At 20 requests per
   day per model, a generous retry policy spends the day's budget on a queue
   that is not moving. Each model gets one retry, then the client moves to the

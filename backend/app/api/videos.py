@@ -1,33 +1,54 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..config import Settings, get_settings
-from ..models import RenderAttempt
-from ..services.animation import animate_concept
+from ..services.explainer import build_explainer
 from ..services.llm.base import LLMClient
+from ..services.media.base import MediaTool
 from ..services.render.base import Renderer
-from .deps import provide_llm, provide_renderer
+from ..services.speech.base import Speech
 from ..services.store import (
     ConceptNotFoundError,
     PaperNotFoundError,
     PaperStore,
     get_store,
 )
+from .deps import provide_llm, provide_media, provide_renderer, provide_speech
 
 router = APIRouter(prefix="/papers/{paper_id}/concepts/{concept_id}/video", tags=["video"])
 
 
-class RenderResponse(BaseModel):
+class SceneReport(BaseModel):
+    """What happened to one scene, so a caller can see inside the pipeline.
+
+    `attempts` carries the *outcomes* only -- "render-failed", "invalid-code"
+    -- and never the detail behind them. That detail is distilled renderer
+    stderr, which names paths inside the image and, on a bad day, could name
+    paths outside it. It is written for the model and for the server log, not
+    for an HTTP client. This leaked briefly in milestone 4 when the attempt
+    objects were serialised whole into a 502 body; there is a test for it now.
+    """
+
+    index: int
+    narration: str
+    seconds: Optional[float]  # measured narration length, which set the target
+    generated: bool           # False when this scene fell back to a card
+    attempts: list[str]
+    note: str = ""
+
+
+class VideoResponse(BaseModel):
     concept_id: str
     video_url: str
     seconds: float
-    generated: bool  # False when every attempt failed and the card was used
-    plan: str        # what the model said it was going to animate
-    attempts: list[RenderAttempt]
+    scenes: list[SceneReport]
+    generated_scenes: int  # how many were animated rather than carded
 
 
-@router.post("", response_model=RenderResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=VideoResponse, status_code=status.HTTP_201_CREATED)
 async def render_concept_video(
     paper_id: str,
     concept_id: str,
@@ -35,11 +56,18 @@ async def render_concept_video(
     store: PaperStore = Depends(get_store),
     renderer: Renderer = Depends(provide_renderer),
     llm: LLMClient = Depends(provide_llm),
-) -> RenderResponse:
-    """Have the model write an animation for this concept, and render it.
+    speech: Speech = Depends(provide_speech),
+    media: MediaTool = Depends(provide_media),
+) -> VideoResponse:
+    """Build a narrated explainer for this concept.
 
-    Still blocking, and now blocking for longer: up to `max_render_attempts`
-    model calls and container starts. Milestone 6 moves this onto a queue.
+    Split into scenes, narrate each, measure the narration, animate to that
+    length, mux and concatenate.
+
+    Still blocking, and now the slowest thing in the app: one model call to
+    split, then up to `max_render_attempts` calls and container starts per
+    scene. Milestone 6 moves this onto a queue -- by this milestone that is
+    less a nicety than the obvious next problem.
     """
     try:
         concept = store.concept(paper_id, concept_id)
@@ -48,38 +76,51 @@ async def render_concept_video(
     except ConceptNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such concept.")
 
-    outcome = await animate_concept(
+    destination = store.video_path(concept_id)
+    outcome = await build_explainer(
         llm,
         renderer,
+        speech,
+        media,
         concept,
-        store.video_path(concept_id),
+        destination,
+        workdir=destination.parent / f".scenes-{concept_id}",
+        max_scenes=settings.max_scenes,
         max_attempts=settings.max_render_attempts,
         timeout=settings.render_timeout_seconds,
-        fallback=settings.fallback_to_title_card,
     )
 
-    if outcome.result is None:
-        # Every attempt failed and the fallback did too, or is switched off.
-        # The attempt log goes in the response so the caller can see why --
-        # it is our own diagnostics, not raw renderer stderr.
+    scenes = [
+        SceneReport(
+            index=s.index,
+            narration=s.narration,
+            seconds=s.audio_seconds,
+            generated=s.generated,
+            attempts=[a.outcome for a in s.animation.attempts] if s.animation else [],
+            note=s.note,
+        )
+        for s in outcome.scenes
+    ]
+
+    if outcome.path is None:
+        # The scene reports are our own diagnostics, not raw renderer stderr,
+        # so they are safe to hand back.
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY,
             {
-                "message": f"Could not render this concept in "
-                f"{settings.max_render_attempts} attempts.",
-                "attempts": [a.model_dump() for a in outcome.attempts],
+                "message": "Could not build a video for this concept.",
+                "scenes": [s.model_dump() for s in scenes],
             },
         )
 
     url = f"/api/papers/{paper_id}/concepts/{concept_id}/video"
     store.set_video(paper_id, concept_id, url)
-    return RenderResponse(
+    return VideoResponse(
         concept_id=concept_id,
         video_url=url,
-        seconds=round(outcome.result.seconds, 2),
-        generated=outcome.generated,
-        plan=outcome.plan,
-        attempts=outcome.attempts,
+        seconds=round(outcome.seconds, 2),
+        scenes=scenes,
+        generated_scenes=outcome.generated_scenes,
     )
 
 
