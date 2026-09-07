@@ -1,63 +1,82 @@
 import { PaperList } from "./components/paper-list";
+import { SphereCanvas } from "./components/sphere-canvas";
 import { Uploader } from "./components/uploader";
 
-const STEPS = [
+const FEATURES = [
   {
-    n: "01",
-    title: "Read",
-    body: "The PDF is parsed and the handful of ideas that actually matter are pulled out, ordered so prerequisites come first.",
+    title: "Concept distillation",
+    body: "The handful of ideas that make the paper follow, ordered so prerequisites come first, each traced to its pages.",
   },
   {
-    n: "02",
-    title: "Write",
-    body: "A model writes the narration, then Manim code to fit it. If a render fails, it gets its own traceback back and tries again.",
+    title: "Narrated animation",
+    body: "A model writes the words, then Manim code to fit them. A failed render gets its own traceback back and tries again.",
   },
   {
-    n: "03",
-    title: "Render",
-    body: "Everything runs in a sandboxed container: animation, a local voice, ffmpeg. No key, no quota, no network.",
+    title: "Everything local",
+    body: "Rendering, voice and ffmpeg run in a sandboxed container with no network. No key, no quota, no bill.",
   },
 ];
 
+// Entrances are timed to land after the sphere has grown in (2.5s).
+const AFTER_INTRO = 2.0;
+
 export default function Home() {
   return (
-    <div className="space-y-16">
-      <section className="animate-rise pt-6 text-center sm:pt-12">
-        <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-accent/80">
-          research papers, distilled
-        </p>
-        <h1 className="wordmark mx-auto max-w-3xl text-4xl leading-[1.08] sm:text-6xl">
-          Turn a paper into an explainer you&rsquo;d actually watch
-        </h1>
-        <p className="mx-auto mt-5 max-w-xl text-base text-muted sm:text-lg">
-          Upload a PDF. Get the core concepts back. Turn any of them into a
-          short, narrated animation in the style of 3blue1brown.
-        </p>
-      </section>
+    <div className="relative min-h-screen overflow-hidden">
+      <SphereCanvas introSeconds={2.5} />
+      {/* Darkens the sphere where text sits, fading in once it has appeared. */}
+      <div
+        className="animate-fade pointer-events-none fixed inset-0 z-0 bg-gradient-to-b from-black/50 via-black/25 to-black/60"
+        style={{ animationDelay: "1.5s", animationDuration: "1s" }}
+      />
 
-      <section className="animate-rise mx-auto max-w-2xl" style={{ animationDelay: "120ms" }}>
-        <Uploader />
-      </section>
-
-      <section
-        className="animate-rise grid gap-4 sm:grid-cols-3"
-        style={{ animationDelay: "220ms" }}
-      >
-        {STEPS.map((s) => (
-          <div key={s.n} className="glass rounded-xl p-5">
-            <p className="font-mono text-xs text-accent/70">{s.n}</p>
-            <h3 className="mt-1 text-base font-semibold">{s.title}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-muted">{s.body}</p>
+      <main className="relative z-10 px-6 pb-24 pt-36">
+        <div className="mx-auto max-w-4xl space-y-16">
+          <div
+            className="animate-rise space-y-6 text-center"
+            style={{ animationDelay: `${AFTER_INTRO}s` }}
+          >
+            <p className="eyebrow">Essence of Pi</p>
+            <h1 className="text-[clamp(2.2rem,4.8vw,3.6rem)] font-light leading-[1.1] tracking-[-0.04em]">
+              Research papers, distilled into{" "}
+              <span className="font-normal">explainers you&rsquo;d actually watch</span>.
+            </h1>
+            <p className="mx-auto max-w-2xl text-lg text-fg-2">
+              Upload a paper. Get its core ideas back. Turn any of them into a
+              short, narrated animation in the style of 3blue1brown.
+            </p>
           </div>
-        ))}
-      </section>
 
-      <section className="animate-rise" style={{ animationDelay: "320ms" }}>
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-muted">
-          Your papers
-        </h2>
-        <PaperList />
-      </section>
+          <div className="animate-fade" style={{ animationDelay: `${AFTER_INTRO + 0.3}s` }}>
+            <Uploader />
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-3">
+            {FEATURES.map((f, i) => (
+              <div
+                key={f.title}
+                className="card card-hover animate-rise p-8 text-left"
+                style={{ animationDelay: `${AFTER_INTRO + 0.6 + i * 0.15}s` }}
+              >
+                <p className="eyebrow mb-3 tracking-[0.3em]">
+                  {String(i + 1).padStart(2, "0").split("").join(" ")}
+                </p>
+                <h3 className="mb-2 text-xl font-light">{f.title}</h3>
+                <p className="text-sm leading-relaxed text-fg-2">{f.body}</p>
+              </div>
+            ))}
+          </div>
+
+          <div
+            className="animate-rise"
+            id="papers"
+            style={{ animationDelay: `${AFTER_INTRO + 1.1}s` }}
+          >
+            <p className="eyebrow mb-4">Recent papers</p>
+            <PaperList />
+          </div>
+        </div>
+      </main>
     </div>
   );
 }

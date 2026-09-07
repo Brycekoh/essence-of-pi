@@ -682,3 +682,30 @@ entrances.
 - **Low contrast is the point.** The background sits behind text on every
   page. It has to read as texture, not content, so every colour is mixed at
   10 to 35 percent.
+
+### Second design pass: match the reference, not my taste
+
+The first pass was teal-and-indigo with a drifting noise field. The reaction
+was "it just looks ugly, do something similar to the repo I sent". Fair, and
+I had not actually looked at the reference before styling -- I had read its
+CSS and guessed.
+
+Looking at its landing screenshot settled it in one glance: **monochrome**.
+Near-black, white light-weight Geist, wide-tracked uppercase eyebrows, glass
+panels lit from inside by white glow, pill buttons, a floating pill nav
+instead of a header bar -- and a single glowing refractive sphere behind the
+upload panel that fades and grows in over the first two seconds.
+
+- **Look at the thing before imitating it.** Reading the reference's Tailwind
+  config told me its colours were white-on-black; it did not tell me the
+  sphere was the whole design. A screenshot did in a second.
+- **The sphere is a disc, not a raymarch.** Its surface normal is
+  reconstructed from the radius, which is all the lighting needs: a key light,
+  a fresnel rim, a specular dot, and a texture sampled at a warped position so
+  it reads as bent by glass. Three samples with a small offset give the
+  chromatic split at the edge. ~90 lines of GLSL, my own.
+- **Own implementation, borrowed look.** The reference has no licence file,
+  so nothing of its shader or components was read for reuse. Layout, palette
+  and timing were taken from the screenshot; every line of code is new.
+- **The interior had to be dimmed after the first screenshot.** Text and
+  panels sit on the sphere; the rim is what should read, not the body.

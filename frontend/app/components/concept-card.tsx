@@ -73,93 +73,83 @@ export function ConceptCard({
 
   return (
     <li
-      className={`glass animate-rise rounded-2xl p-5 transition-all duration-300
-        ${building ? "border-accent/40" : "hover:border-accent/30"}`}
-      style={{ animationDelay: `${delay}ms` }}
+      className={`card animate-rise p-8 ${building ? "" : "card-hover"}`}
+      style={{
+        animationDelay: `${delay}ms`,
+        ...(building ? { borderColor: "rgb(255 255 255 / 0.32)" } : {}),
+      }}
     >
-      <div className="flex items-start gap-4">
-        {/* Index badge: the ordering is meaningful, prerequisites come first. */}
-        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-accent-dim font-mono text-xs text-accent">
-          {index}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <h3 className="text-lg font-semibold leading-snug">{concept.name}</h3>
-              <p className="mt-0.5 text-xs text-muted">
-                pages {concept.source_pages.join(", ") || "—"}
-              </p>
-            </div>
-
-            {state.kind === "idle" && (
-              <button
-                onClick={build}
-                className="shrink-0 rounded-lg bg-accent px-3.5 py-1.5 text-sm font-medium text-bg transition hover:brightness-110"
-              >
-                Build video
-              </button>
-            )}
-            {state.kind === "failed" && (
-              <button
-                onClick={build}
-                className="shrink-0 rounded-lg border border-line px-3.5 py-1.5 text-sm text-muted transition hover:border-accent/40 hover:text-fg"
-              >
-                Try again
-              </button>
-            )}
-            {state.kind === "done" && (
-              <button
-                onClick={build}
-                className="shrink-0 text-xs text-muted transition hover:text-accent"
-                title="Generate a new version"
-              >
-                rebuild
-              </button>
-            )}
-          </div>
-
-          <p className="mt-2 text-sm leading-relaxed text-fg/90">{concept.summary}</p>
+      <div className="flex items-start justify-between gap-6">
+        <div className="min-w-0 space-y-2">
+          <p className="eyebrow tracking-[0.3em]">
+            {String(index).padStart(2, "0").split("").join(" ")}
+            <span className="ml-4 normal-case tracking-normal">
+              pages {concept.source_pages.join(", ") || "—"}
+            </span>
+          </p>
+          <h3 className="text-2xl font-light leading-tight tracking-tight">{concept.name}</h3>
+          <p className="text-fg-2">{concept.summary}</p>
           <button
             onClick={() => setOpen((o) => !o)}
-            className="mt-1.5 text-xs text-muted transition hover:text-accent"
+            className="text-xs text-fg-3 transition-colors hover:text-fg"
           >
             {open ? "less ↑" : "more ↓"}
           </button>
           {open && (
-            <div className="animate-fade mt-3 space-y-2 border-l border-line pl-3 text-sm text-muted">
+            <div className="animate-fade space-y-2 border-l border-fg/15 pl-4 text-sm text-fg-2">
               <p>{concept.explanation}</p>
               {concept.prerequisites.length > 0 && (
                 <p>
-                  <span className="text-fg/70">Assumes: </span>
+                  <span className="text-fg-3">Assumes </span>
                   {concept.prerequisites.join(", ")}
                 </p>
               )}
               <p>
-                <span className="text-fg/70">On screen: </span>
+                <span className="text-fg-3">On screen </span>
                 {concept.visual_hint}
               </p>
             </div>
           )}
+        </div>
 
-          {building && (
-            <div className="mt-4">
-              <Progress events={state.events} />
-            </div>
+        <div className="shrink-0">
+          {state.kind === "idle" && (
+            <button onClick={build} className="btn-primary text-sm">
+              Build video
+            </button>
           )}
           {state.kind === "failed" && (
-            <p className="mt-3 text-sm text-bad">{state.message}</p>
+            <button onClick={build} className="btn-secondary text-sm">
+              Try again
+            </button>
           )}
           {state.kind === "done" && (
-            <video
-              className="animate-fade mt-4 w-full shadow-2xl shadow-black/50"
-              controls
-              preload="metadata"
-              src={state.src}
-            />
+            <button onClick={build} className="btn-secondary text-xs" title="Generate a new version">
+              Rebuild
+            </button>
           )}
         </div>
       </div>
+
+      {building && (
+        <div className="mt-8">
+          <Progress events={state.events} />
+        </div>
+      )}
+      {state.kind === "failed" && (
+        <p className="mt-6 inline-block rounded-full border border-bad/30 bg-bad/10 px-4 py-1 text-sm text-bad">
+          {state.message}
+        </p>
+      )}
+      {state.kind === "done" && (
+        <video
+          className="animate-fade mt-8 w-full"
+          style={{ boxShadow: "0 30px 80px rgb(0 0 0 / 0.7)" }}
+          controls
+          preload="metadata"
+          src={state.src}
+        />
+      )}
     </li>
   );
 }
