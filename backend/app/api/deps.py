@@ -43,8 +43,19 @@ def provide_renderer(settings: Settings = Depends(get_settings)) -> Renderer:
 
 
 def provide_speech(settings: Settings = Depends(get_settings)) -> Speech:
-    """Narration. gTTS needs no key, so there is nothing to fail on here."""
-    return build_speech(settings.speech_lang, settings.speech_tld)
+    """Narration. Neither engine needs a key, so nothing can fail here."""
+    return build_speech(
+        settings.speech_engine,
+        image=settings.renderer_image,
+        voice=settings.piper_voice,
+        sentence_silence=settings.speech_sentence_silence,
+        length_scale=settings.speech_length_scale,
+        lang=settings.speech_lang,
+        tld=settings.speech_tld,
+        memory=settings.render_memory,
+        cpus=settings.render_cpus,
+        docker_bin=settings.renderer_docker_bin,
+    )
 
 
 def provide_media(settings: Settings = Depends(get_settings)) -> MediaTool:

@@ -506,3 +506,39 @@ it implied -- "this is what the system makes" -- was not.
 
 **Verified after the fix:** Internal Covariate Shift, 2 scenes, 32.7s, h264
 plus aac, both scenes generated first attempt, 144 seconds to build.
+
+
+---
+
+## Interlude — a better voice
+
+gTTS sounded like a satnav, so the narrator got replaced. Piper, running in the
+render image.
+
+**Why not the obvious answers.** *Whisper* is speech-to-text -- the opposite
+direction, and a common mix-up worth naming. *Kokoro* sounds better than Piper
+and pulls in torch, which would have taken a 2 GB image past 5 GB; for a
+container that gets rebuilt often that is the deciding fact, not the audio.
+*Gemini TTS* was tempting because the key already exists, but it draws on the
+same twenty-requests-per-day quota as code generation -- narration would have
+competed with the thing that actually needs the quota.
+
+**What Piper cost:** 260 MB. ONNX, no torch, one voice baked in at build time
+because the container runs with `--network none` and cannot fetch anything.
+
+**Things I learned**
+
+- **Pacing is a setting.** `--sentence-silence 0.45` puts a real breath between
+  sentences and `--length-scale` slows delivery. gTTS ran everything together;
+  for an explainer that is as damaging as a robotic timbre, and no amount of
+  better voice model fixes it if the pauses are not there.
+- **A local engine is deterministic, and that compounds.** The same text gives
+  the same audio, so builds are reproducible and a future cache can key on the
+  narration text. A hosted voice can change under you between runs.
+- **The seam paid for itself exactly as intended.** Adding an engine was one
+  new module and one branch in `build_speech`. Nothing in the explainer, the
+  API, or any test above that layer changed. That is the second time a
+  protocol written in an earlier milestone made a later one cheap.
+- **Narration gets the same sandbox as rendering.** There is no reason a
+  text-to-speech process needs network access either, and a test asserts the
+  flags rather than trusting that.

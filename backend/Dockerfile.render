@@ -1,19 +1,41 @@
-# The rendering sandbox: manim, LaTeX, and ffmpeg in one image.
+# The rendering sandbox: manim, LaTeX, ffmpeg and a text-to-speech voice.
 #
-# Why this exists: manim 0.19 renders video through PyAV's bundled libav and
-# ships no ffmpeg *binary*. Milestone 5 needs to mux narration onto a clip and
-# concatenate clips, which is a one-line ffmpeg job and a fiddly PyAV one. So
-# the base image gets ffmpeg added rather than the muxing being rewritten.
+# Why this exists: manim 0.21 renders video through PyAV's bundled libav and
+# ships no ffmpeg *binary*, so muxing narration onto a clip would be
+# impossible on the upstream image. Since the image had to be built anyway,
+# the narration engine lives here too -- which means TTS costs no API quota,
+# needs no key, and runs in the same network-isolated container as everything
+# else.
 #
-# Build (once, ~1 min on top of the 2 GB base):
+# Build (once, ~2 min on top of the 2 GB base):
 #   docker build -f Dockerfile.render -t essence-of-pi/render:latest .
 FROM manimcommunity/manim:stable
 
 USER root
+
+# espeak-ng is Piper's phonemiser; python3 is Debian's, kept separate from
+# manim's own /opt/venv so a TTS dependency can never break the renderer.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg \
+ && apt-get install -y --no-install-recommends \
+      ffmpeg espeak-ng python3 python3-venv curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-# Back to the unprivileged user the base image defines. Generated code runs as
-# this user, with no network and a memory cap -- see services/render/.
+RUN python3 -m venv /opt/piper \
+ && /opt/piper/bin/pip install --no-cache-dir --upgrade pip \
+ && /opt/piper/bin/pip install --no-cache-dir piper-tts==1.8.0
+
+# The voice is baked in, not downloaded at run time: the render container runs
+# with --network none, so anything it needs must already be inside it.
+ARG VOICE=en_US-lessac-medium
+ARG VOICE_PATH=en/en_US/lessac/medium
+RUN mkdir -p /opt/voices \
+ && curl -fsSL -o "/opt/voices/${VOICE}.onnx" \
+      "https://huggingface.co/rhasspy/piper-voices/resolve/main/${VOICE_PATH}/${VOICE}.onnx" \
+ && curl -fsSL -o "/opt/voices/${VOICE}.onnx.json" \
+      "https://huggingface.co/rhasspy/piper-voices/resolve/main/${VOICE_PATH}/${VOICE}.onnx.json" \
+ && chmod -R a+rX /opt/voices
+
+ENV PIPER_BIN=/opt/piper/bin/piper
+ENV PIPER_VOICE=/opt/voices/en_US-lessac-medium.onnx
+
 USER manimuser

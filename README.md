@@ -69,7 +69,9 @@ cd backend && docker build -f Dockerfile.render -t essence-of-pi/render:latest .
 
 The upstream manim image has **no ffmpeg binary** — manim 0.21 renders through
 PyAV's bundled libav — so narration could not be muxed on it. The derived image
-carries manim, LaTeX and ffmpeg, and is the sandbox for all three.
+carries manim, LaTeX, ffmpeg **and a Piper voice**, and is the sandbox for all
+of them. Narration therefore costs no API quota, needs no key, and runs with
+`--network none` like everything else.
 
 Nothing else is installed on the host — no manim, no ffmpeg, no LaTeX. If the
 daemon is down the render route returns `502` saying so.
@@ -193,6 +195,14 @@ Decisions made in milestone 1 that the later milestones depend on:
   upgrade, and browsers reconnect it for free. The reference project used a
   WebSocket and hand-rolled keepalives and reconnection for a stream that never
   carries a client message.
+- **The narrator is local.** Piper runs in the render image (+260 MB, ONNX).
+  The scarce resource here is model requests per day, and spending them on a
+  voice would be a bad trade. It is also deterministic, so the same text gives
+  the same audio — which a hosted API never does. `SPEECH_ENGINE=gtts` keeps
+  the old behaviour for anyone who has not built the image.
+- **Pacing is a setting, not a hope.** `--sentence-silence` puts a real pause
+  between ideas; gTTS ran sentences together, which for an explainer matters
+  as much as timbre.
 - **Narration is synthesised before the animation is written.** The speech
   is measured, and its length becomes the animation's target — the reverse
   order produced 5.3s of video under 13.7s of speech, which meant holding a
