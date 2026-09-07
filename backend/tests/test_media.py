@@ -142,9 +142,11 @@ def _speech(engine: str):
     return build_speech(
         engine,
         image=IMAGE,
-        voice="/opt/voices/en_US-lessac-medium.onnx",
+        voice="/opt/voices/en_US-hfc_female-medium.onnx",
         sentence_silence=0.45,
         length_scale=1.0,
+        noise_scale=None,
+        noise_w_scale=None,
         lang="en",
         tld="com",
         memory="1g",
@@ -174,7 +176,8 @@ def test_piper_runs_in_the_same_sandbox_as_the_renderer(tmp_path):
     assert argv[argv.index("--entrypoint") + 1] == "/opt/piper/bin/piper"
     assert "--rm" in argv and "--name" in argv
     assert argv[argv.index("--sentence-silence") + 1] == "0.45"
-    assert "/opt/voices/en_US-lessac-medium.onnx" in argv
+    assert "/opt/voices/en_US-hfc_female-medium.onnx" in argv
+    assert "--noise-scale" not in argv, "None means: keep the voice's own default"
 
 
 async def test_piper_refuses_empty_text(tmp_path):

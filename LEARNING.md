@@ -542,3 +542,29 @@ because the container runs with `--network none` and cannot fetch anything.
 - **Narration gets the same sandbox as rendering.** There is no reason a
   text-to-speech process needs network access either, and a test asserts the
   flags rather than trusting that.
+
+### Smoothing it
+
+The first voice was picked by me and rejected by the person listening, which is
+the correct order for that decision. Downloading five alternatives and playing
+them side by side cost nothing -- a Piper voice is a file, and swapping one is
+a config line.
+
+Four knobs, in ascending order of how much they mattered:
+
+1. `--length-scale 1.12`. TTS defaults are tuned for assistants answering
+   questions, not for explaining something. Almost everything sounds better
+   12% slower.
+2. `--sentence-silence 0.6`. The gap between ideas is where understanding
+   happens.
+3. `--noise-scale` / `--noise-w-scale`. Counterintuitive: *lower* is smoother.
+   Left at the voice's own defaults, exposed as config for later.
+4. **The narration text itself** -- and this is not a Piper setting at all. A
+   synthesised voice breathes at punctuation, so three long sentences give it
+   three places to breathe. Asking the model for short single-idea sentences
+   did more for smoothness than any parameter, costs nothing, and improves
+   every future video rather than one.
+
+The generalisable bit: when output quality disappoints, check whether the
+*input* is the problem before tuning the engine. I reached for parameters
+first, and they were the smaller half.

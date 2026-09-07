@@ -36,8 +36,10 @@ class PiperSpeech:
         *,
         image: str,
         voice: str = "/opt/voices/en_US-lessac-medium.onnx",
-        sentence_silence: float = 0.45,
-        length_scale: float = 1.0,
+        sentence_silence: float = 0.6,
+        length_scale: float = 1.12,
+        noise_scale: float | None = None,
+        noise_w_scale: float | None = None,
         memory: str = "1g",
         cpus: str = "2",
         docker_bin: str = "docker",
@@ -47,6 +49,11 @@ class PiperSpeech:
         self.voice = voice
         self.sentence_silence = sentence_silence
         self.length_scale = length_scale
+        # None means "use the voice's own default", which is usually right.
+        # Lower values give steadier, more even delivery; higher gives more
+        # expression and more chances for an odd emphasis.
+        self.noise_scale = noise_scale
+        self.noise_w_scale = noise_w_scale
         self.memory = memory
         self.cpus = cpus
         self.docker_bin = docker_bin
@@ -58,15 +65,21 @@ class PiperSpeech:
         Narration gets the same sandbox as rendering. It has no business
         reaching the network either.
         """
+        command = [
+            "-m", self.voice,
+            "-i", f"{CONTAINER_WORKDIR}/line.txt",
+            "-f", f"{CONTAINER_WORKDIR}/out.wav",
+            "--sentence-silence", str(self.sentence_silence),
+            "--length-scale", str(self.length_scale),
+        ]
+        if self.noise_scale is not None:
+            command += ["--noise-scale", str(self.noise_scale)]
+        if self.noise_w_scale is not None:
+            command += ["--noise-w-scale", str(self.noise_w_scale)]
+
         return build_argv(
             image=self.image,
-            command=[
-                "-m", self.voice,
-                "-i", f"{CONTAINER_WORKDIR}/line.txt",
-                "-f", f"{CONTAINER_WORKDIR}/out.wav",
-                "--sentence-silence", str(self.sentence_silence),
-                "--length-scale", str(self.length_scale),
-            ],
+            command=command,
             workdir=workdir,
             container=container,
             memory=self.memory,

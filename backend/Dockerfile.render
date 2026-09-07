@@ -26,8 +26,8 @@ RUN python3 -m venv /opt/piper \
 
 # The voice is baked in, not downloaded at run time: the render container runs
 # with --network none, so anything it needs must already be inside it.
-ARG VOICE=en_US-lessac-medium
-ARG VOICE_PATH=en/en_US/lessac/medium
+ARG VOICE=en_US-hfc_female-medium
+ARG VOICE_PATH=en/en_US/hfc_female/medium
 RUN mkdir -p /opt/voices \
  && curl -fsSL -o "/opt/voices/${VOICE}.onnx" \
       "https://huggingface.co/rhasspy/piper-voices/resolve/main/${VOICE_PATH}/${VOICE}.onnx" \
@@ -36,6 +36,6 @@ RUN mkdir -p /opt/voices \
  && chmod -R a+rX /opt/voices
 
 ENV PIPER_BIN=/opt/piper/bin/piper
-ENV PIPER_VOICE=/opt/voices/en_US-lessac-medium.onnx
+ENV PIPER_VOICE=/opt/voices/en_US-hfc_female-medium.onnx
 
 USER manimuser
