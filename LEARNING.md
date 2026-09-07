@@ -423,3 +423,50 @@ produces a valid mp4, so nothing in the correction loop notices. The loop only
 ever sees crashes. Catching a *visual* defect needs a different mechanism
 entirely: rendering a frame and having something look at it. That is the honest
 ceiling on this design, and it took seeing the output to find it.
+
+
+---
+
+## Milestone 6 — Concurrency and progress
+
+**Built:** a job registry, builds moved off the request path, scenes rendering
+in parallel under a global cap, and progress over server-sent events. Twelve
+new tests.
+
+**The scoping decision, stated plainly.** The roadmap said "a real job queue",
+meaning Redis and a worker process. I built it in-process instead. Jobs live in
+this process's memory: a restart loses them, and a second uvicorn worker would
+not see them. That is a stopping point I chose, not one I missed, and the README
+says so next to the feature rather than in a footnote.
+
+**Things I learned**
+
+- **202 is the whole milestone.** A build is one split call plus up to three
+  model calls and container starts per scene. Holding an HTTP connection open
+  for that is not slow, it is wrong -- proxies close it, retries duplicate the
+  work, and the client has nothing to show meanwhile.
+- **SSE beats a WebSocket for one-way progress.** No protocol upgrade, plain
+  HTTP, and browsers reconnect automatically. The reference project used a
+  WebSocket and then had to hand-write keepalives and reconnection logic for a
+  stream that never carries a message from the client.
+- **Replay before you subscribe.** A client that connects a second after the
+  job starts would otherwise join midway and never learn what it missed. The
+  stream sends the recorded events first, then live ones.
+- **A publisher must never be blocked by a subscriber.** `publish` uses
+  `put_nowait` and drops on a full queue. A browser tab that stops reading must
+  not be able to stall the render pipeline reporting to it -- there is a test
+  that fires 500 events at a full queue and asserts all 500 are still recorded.
+- **The semaphore belongs around the whole generate-render cycle, not the
+  render.** Releasing between the model call and the container start just lets
+  everything pile up at the container.
+- **Fixtures do not cross module boundaries.** `rendered` lived in
+  `test_video.py`; the moment a second module needed it, it had to move to
+  `conftest.py`. Importing a fixture does not register it.
+
+**Open questions for later**
+
+- Jobs are lost on restart. Milestone 8 territory.
+- Nothing cancels a running job.
+- Parallel scenes mean parallel model calls, which burns the free-tier quota
+  faster and invites the 503s from the interlude. `max_parallel_renders` is
+  the lever and it defaults to 2.

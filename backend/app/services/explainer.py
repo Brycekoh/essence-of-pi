@@ -17,11 +17,13 @@ the same instinct as the title-card fallback, one level up.
 """
 
 import asyncio
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from ..models import Concept, SceneSpec, SceneSplit
+from ..models.job import JobEvent
 from .animation import AnimationOutcome, SceneBrief, animate
 from .llm.base import LLMClient, LLMError
 from .media.base import MediaError, MediaTool
@@ -93,9 +95,28 @@ async def build_explainer(
     max_scenes: int = 3,
     max_attempts: int = 3,
     timeout: float = 300.0,
+    progress=None,
+    semaphore: Optional[asyncio.Semaphore] = None,
 ) -> ExplainerOutcome:
-    """Produce one narrated explainer for `concept`."""
+    """Produce one narrated explainer for `concept`.
+
+    `progress` is called with a `JobEvent` at each stage. It knows nothing
+    about jobs or HTTP -- it is just somewhere to report to, which is what
+    keeps this module free of either.
+
+    `semaphore` bounds how many scenes render at once, across every job in the
+    process. Scenes are independent once their narration is measured, so they
+    animate in parallel; without a bound, three jobs of three scenes would ask
+    the machine for nine containers.
+    """
+    def emit(stage: str, message: str, scene=None, total=None) -> None:
+        if progress:
+            progress(
+                JobEvent(stage=stage, message=message, scene=scene, total_scenes=total)
+            )
+
     workdir.mkdir(parents=True, exist_ok=True)
+    emit("split", f"Breaking '{concept.name}' into scenes.")
 
     try:
         split = await llm.structured(
@@ -131,34 +152,53 @@ async def build_explainer(
     if not specs:
         return ExplainerOutcome(path=None)
 
+    emit("narrate", f"Narrating {len(specs)} scenes.", total=len(specs))
+
     # Narration first, for every scene, before any animation is generated:
     # each scene's length is a measured fact by the time its code is written.
     narrations = await _narrate_all(speech, media, specs, workdir)
 
-    outcomes: list[SceneOutcome] = []
-    for index, (spec, (audio, seconds, note)) in enumerate(
-        zip(specs, narrations), start=1
-    ):
-        outcome = await _build_scene(
-            llm,
-            renderer,
-            media,
-            concept,
-            spec,
-            index=index,
-            audio=audio,
-            seconds=seconds,
-            note=note,
-            workdir=workdir,
-            max_attempts=max_attempts,
-            timeout=timeout,
+    async def one(index: int, spec: SceneSpec, narration) -> SceneOutcome:
+        audio, seconds, note = narration
+        # The semaphore is held for the whole generate-render cycle, not just
+        # the render: the model call is what decides how long the container
+        # will run, and releasing between them just lets everything pile up.
+        async with (semaphore or contextlib.nullcontext()):
+            emit(
+                "animate",
+                f"Animating scene {index} of {len(specs)}.",
+                scene=index,
+                total=len(specs),
+            )
+            return await _build_scene(
+                llm,
+                renderer,
+                media,
+                concept,
+                spec,
+                index=index,
+                audio=audio,
+                seconds=seconds,
+                note=note,
+                workdir=workdir,
+                max_attempts=max_attempts,
+                timeout=timeout,
+            )
+
+    outcomes = list(
+        await asyncio.gather(
+            *(
+                one(i, spec, narration)
+                for i, (spec, narration) in enumerate(zip(specs, narrations), start=1)
+            )
         )
-        outcomes.append(outcome)
+    )
 
     clips = [s.clip for s in outcomes if s.clip]
     if not clips:
         return ExplainerOutcome(path=None, scenes=outcomes)
 
+    emit("stitch", f"Stitching {len(clips)} clips together.", total=len(specs))
     try:
         await media.concat(clips, destination)
         seconds = await media.duration(destination)

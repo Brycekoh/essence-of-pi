@@ -93,6 +93,16 @@ class Settings(BaseSettings):
     # ffmpeg work is quick; a long timeout here just hides a hung container.
     media_timeout_seconds: float = 180.0
 
+    # --- Jobs (milestone 6) ---
+    # How many scenes may render at once, across every job in the process.
+    # Each container gets render_cpus CPUs and render_memory, so this is a
+    # statement about the machine, not about the workload.
+    max_parallel_renders: int = 2
+
+    # Finished jobs kept in memory for status polling. Running jobs are never
+    # evicted regardless of this.
+    job_history: int = 50
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]

@@ -1,5 +1,7 @@
+import json
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -40,13 +42,23 @@ def queue_video(stub_llm, *narrations: str) -> None:
         stub_llm.queue(scene())
 
 
-@pytest.fixture
-def rendered(client, sample_pdf, stub_llm):
-    """A paper with one extracted concept, ready to render."""
-    paper_id = upload(client, sample_pdf).json()["id"]
-    stub_llm.queue(ConceptExtraction(concepts=[draft()]))
-    concept = client.post(f"/api/papers/{paper_id}/concepts").json()["concepts"][0]
-    return paper_id, concept["id"]
+def build_video(client, paper_id, concept_id, timeout: float = 10.0):
+    """POST the job and poll until it finishes.
+
+    The endpoint returns 202 immediately now, so a test that wants the finished
+    article has to wait for it -- exactly like a real client does.
+    """
+    started = client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
+    assert started.status_code == 202, started.text
+    job_id = started.json()["id"]
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        job = client.get(f"/api/jobs/{job_id}").json()
+        if job["status"] in ("succeeded", "failed"):
+            return job
+        time.sleep(0.02)
+    raise AssertionError(f"job {job_id} did not finish within {timeout}s")
 
 
 # --- the endpoint ---------------------------------------------------------
@@ -56,18 +68,18 @@ def test_render_produces_a_playable_url(client, rendered, stub_llm, stub_speech)
     paper_id, concept_id = rendered
     queue_video(stub_llm, "First line.", "Second line.")
 
-    response = client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
-    assert response.status_code == 201, response.text
+    job = build_video(client, paper_id, concept_id)
 
-    body = response.json()
-    assert body["generated_scenes"] == 2
-    assert [s["index"] for s in body["scenes"]] == [1, 2]
-    assert [s["narration"] for s in body["scenes"]] == ["First line.", "Second line."]
-    assert body["scenes"][0]["attempts"] == ["rendered"], "outcomes only, no stderr"
-    assert stub_speech.said == ["First line.", "Second line."], "every scene narrated"
-    assert body["video_url"].endswith(f"/concepts/{concept_id}/video")
+    assert job["status"] == "succeeded"
+    assert job["video_url"].endswith(f"/concepts/{concept_id}/video")
+    assert sorted(stub_speech.said) == ["First line.", "Second line."]
 
-    video = client.get(body["video_url"])
+    # The progress trail is the milestone: a caller can watch this happen.
+    stages = [e["stage"] for e in job["events"]]
+    assert stages[0] == "split" and stages[-1] == "done"
+    assert "animate" in stages and "stitch" in stages
+
+    video = client.get(job["video_url"])
     assert video.status_code == 200
     assert video.headers["content-type"] == "video/mp4"
     assert video.content.startswith(b"\x00\x00\x00\x1cftyp")
@@ -85,26 +97,25 @@ def test_render_attaches_the_url_to_the_concept(client, rendered, stub_llm):
     queue_video(stub_llm, "One line.")
     assert client.get(f"/api/papers/{paper_id}/concepts/{concept_id}").json()["video_url"] is None
 
-    client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
+    build_video(client, paper_id, concept_id)
 
     concept = client.get(f"/api/papers/{paper_id}/concepts/{concept_id}").json()
     assert concept["video_url"].endswith(f"/concepts/{concept_id}/video")
 
 
-def test_every_scene_failing_is_502_with_the_scene_reports(client, rendered, stub_llm, stub_renderer):
-    """Nothing rendered and nothing to concatenate, so 502 -- with diagnostics."""
+def test_every_scene_failing_fails_the_job(client, rendered, stub_llm, stub_renderer):
+    """A failed build is a failed job, not a failed request."""
     paper_id, concept_id = rendered
     queue_video(stub_llm, "One line.", "Two line.")
     for _ in range(4):  # enough corrections for both scenes
         stub_llm.queue(scene())
     stub_renderer.error = RenderError("manim exited with code 1", stderr="boom", exit_code=1)
 
-    response = client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
-    assert response.status_code == 502
-    # The outcomes are ours to share; the detail behind them is distilled
-    # renderer stderr and names paths inside the image.
-    assert "render-failed" in response.text
-    assert "boom" not in response.text, "renderer stderr never reaches the client"
+    job = build_video(client, paper_id, concept_id)
+
+    assert job["status"] == "failed"
+    assert job["video_url"] is None
+    assert "boom" not in json.dumps(job), "renderer stderr never reaches the client"
 
 
 def test_unknown_ids_are_404_before_any_model_call(client, rendered, stub_llm):
@@ -122,7 +133,7 @@ def test_unknown_paper_is_404(client):
 def test_deleting_a_paper_removes_its_videos(client, rendered, settings, stub_llm):
     paper_id, concept_id = rendered
     queue_video(stub_llm, "One line.")
-    client.post(f"/api/papers/{paper_id}/concepts/{concept_id}/video")
+    build_video(client, paper_id, concept_id)
     video = settings.videos_dir / f"{concept_id}.mp4"
     assert video.exists()
 

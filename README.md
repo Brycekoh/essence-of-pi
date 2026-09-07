@@ -39,7 +39,10 @@ video.
 | `POST` | `/api/papers/{id}/concepts` | Extract concepts with an LLM (replaces any previous set) |
 | `GET` | `/api/papers/{id}/concepts` | Concepts extracted so far |
 | `GET` | `/api/papers/{id}/concepts/{cid}` | One concept |
-| `POST` | `/api/papers/{id}/concepts/{cid}/video` | Build a narrated, multi-scene explainer for this concept |
+| `POST` | `/api/papers/{id}/concepts/{cid}/video` | Queue a build; returns `202` and a job |
+| `GET` | `/api/jobs/{job_id}` | Job status, stage and event history |
+| `GET` | `/api/jobs/{job_id}/events` | Live progress as server-sent events |
+| `GET` | `/api/jobs` | Jobs in this process, newest first |
 | `GET` | `/api/papers/{id}/concepts/{cid}/video` | Stream the rendered mp4 |
 | `GET` | `/health` | Liveness check |
 
@@ -119,8 +122,9 @@ docker compose up --build
       feed their own stderr back in for a correction pass.
 - [x] **5 — Narration.** Concepts split into scenes; each is narrated,
       measured, animated to that measured length, muxed and concatenated.
-- [ ] **6 — Concurrency and progress.** A real job queue, parallel renders, live
-      progress in the UI.
+- [x] **6 — Concurrency and progress.** Builds run off the request path, scenes
+      render in parallel under a global cap, progress streams over SSE.
+      *In-process, single worker* — see the note in Design notes.
 - [ ] **7 — Frontend.** Next.js: upload, browse concepts, watch clips.
 - [ ] **8 — Persistence and deploy.** Postgres, object storage, auth, shipped.
 
@@ -176,6 +180,19 @@ Decisions made in milestone 1 that the later milestones depend on:
   On its first contact with reality this was the only thing that worked: the
   provider refused every generation request, and 6/6 concepts still returned a
   playable video.
+- **Builds do not block the request.** `POST .../video` returns `202` with a
+  job; progress arrives over SSE. A build is a split call plus up to three
+  model calls and container starts *per scene* — minutes, on a connection no
+  proxy would hold open.
+- **The job registry is in-process, deliberately.** Jobs live in this process's
+  memory, so a restart loses them and a second uvicorn worker would not see
+  them. **Run with a single worker.** Redis plus a separate worker process is
+  real infrastructure and milestone 8 rewrites persistence anyway; the swap is
+  one class behind `JobRegistry`.
+- **SSE, not a WebSocket.** Progress is one-way, so it needs no protocol
+  upgrade, and browsers reconnect it for free. The reference project used a
+  WebSocket and hand-rolled keepalives and reconnection for a stream that never
+  carries a client message.
 - **Narration is synthesised before the animation is written.** The speech
   is measured, and its length becomes the animation's target — the reverse
   order produced 5.3s of video under 13.7s of speech, which meant holding a
