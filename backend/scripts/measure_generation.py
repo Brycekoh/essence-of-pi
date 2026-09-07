@@ -31,7 +31,7 @@ from app.services.llm import build_llm  # noqa: E402
 from app.services.media import FfmpegMedia  # noqa: E402
 from app.services.pdf_parser import extract_pages  # noqa: E402
 from app.services.render import ManimDockerRenderer  # noqa: E402
-from app.services.speech import GttsSpeech  # noqa: E402
+from app.services.speech import build_speech  # noqa: E402
 from app.models import Paper  # noqa: E402
 
 
@@ -58,10 +58,29 @@ async def main() -> int:
     llm = build_llm(settings.gemini_api_key, settings.llm_models_csv)
     renderer = ManimDockerRenderer(image=settings.renderer_image, quality=args.quality)
     media = FfmpegMedia(image=settings.renderer_image)
-    speech = GttsSpeech(lang=settings.speech_lang, tld=settings.speech_tld)
+    # Built from config, never hardcoded. A hardcoded engine here is how this
+    # script silently measured a code path the product had stopped using.
+    speech = build_speech(
+        settings.speech_engine,
+        image=settings.renderer_image,
+        voice=settings.piper_voice,
+        sentence_silence=settings.speech_sentence_silence,
+        length_scale=settings.speech_length_scale,
+        lang=settings.speech_lang,
+        tld=settings.speech_tld,
+        memory=settings.render_memory,
+        cpus=settings.render_cpus,
+        docker_bin=settings.renderer_docker_bin,
+        noise_scale=settings.speech_noise_scale,
+        noise_w_scale=settings.speech_noise_w_scale,
+        kokoro_image=settings.kokoro_image,
+        kokoro_voice=settings.kokoro_voice,
+        kokoro_speed=settings.kokoro_speed,
+    )
     args.out.mkdir(parents=True, exist_ok=True)
 
     print(f"models  : {settings.llm_models_csv}")
+    print(f"voice   : {settings.speech_engine}")
     print(f"paper   : {args.pdf}")
 
     pages, title = await extract_pages(args.pdf)

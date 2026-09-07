@@ -1,0 +1,41 @@
+# Kokoro TTS, in its own image.
+#
+# Not layered onto the render image: Kokoro needs torch and manim does not, and
+# a 2.8 GB image that every render pulls should not carry a speech model. The
+# CPU-only torch wheel keeps this to a few hundred megabytes rather than the
+# multi-gigabyte CUDA default.
+#
+# Build:
+#   docker build -f Dockerfile.kokoro -t essence-of-pi/tts:kokoro .
+FROM python:3.12-slim
+
+# espeak-ng is the fallback grapheme-to-phoneme engine misaki reaches for.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends espeak-ng \
+ && rm -rf /var/lib/apt/lists/*
+
+# CPU-only torch. The default PyPI wheel bundles CUDA and is an order of
+# magnitude larger for hardware this container will never have.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch
+RUN pip install --no-cache-dir kokoro soundfile numpy
+
+COPY kokoro_say.py /opt/kokoro_say.py
+
+# Download the weights at build time. The container runs with --network none,
+# so anything not baked in is unreachable.
+ENV HF_HOME=/opt/hf
+# Every voice that might be used must be warmed here. A voice missing from the
+# cache is unreachable at run time, not merely slow -- HF_HUB_OFFLINE turns a
+# missing download into an immediate failure, which is the behaviour we want.
+ARG VOICES="af_heart af_bella af_nicole am_michael am_adam bf_emma"
+RUN mkdir -p /opt/hf \
+ && printf 'Warming the cache.' > /tmp/warm.txt \
+ && for v in $VOICES; do \
+      echo "warming $v"; \
+      python /opt/kokoro_say.py /tmp/warm.txt /tmp/warm.wav "$v" 1.0 || exit 1; \
+    done \
+ && rm -f /tmp/warm.txt /tmp/warm.wav \
+ && chmod -R a+rX /opt/hf
+
+# Fail loudly rather than hanging on a network call that cannot succeed.
+ENV HF_HUB_OFFLINE=1

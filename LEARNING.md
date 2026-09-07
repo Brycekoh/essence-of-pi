@@ -568,3 +568,53 @@ Four knobs, in ascending order of how much they mattered:
 The generalisable bit: when output quality disappoints, check whether the
 *input* is the problem before tuning the engine. I reached for parameters
 first, and they were the smaller half.
+
+
+---
+
+## Interlude — Kokoro, and two bugs I wrote while adding it
+
+Piper was good; Kokoro is better, and the voice was chosen by ear again
+(`af_bella`). It costs a separate 2.88 GB image -- torch, which manim does not
+need, so layering it onto the render image would make every render carry a
+speech model. I had earlier called this "a few hundred megabytes", which was
+wrong: the CPU-only torch wheel is far smaller than the CUDA default but not
+small.
+
+**Bug one: the pause did nothing.** Kokoro has no `--sentence-silence`, so I
+padded between the pipeline's own chunks. Measured, a three-sentence line came
+back as *one* chunk, so the padding sat between one thing and nothing. Fixed by
+splitting sentences before synthesis: 12.8s to 14.65s on the same line, which
+is the pause becoming real.
+
+**Bug two: CRLF, and a suite that could not see it.** Several config edits used
+Python string replacement matching `
+` against files with CRLF endings. They
+matched nothing, changed nothing, and reported success. The result was
+`deps.py` reading `settings.speech_engine`, `settings.kokoro_voice` and three
+other attributes that did not exist on `Settings` at all.
+
+**And 105 tests passed.** Every test overrides `provide_speech`, `provide_llm`,
+`provide_renderer` and `provide_media` with stubs -- which is exactly what
+keeps the suite offline and fast, and exactly why nothing ever tried to build
+the real thing. A real video request would have raised `AttributeError` and
+returned a 500.
+
+**Things I learned**
+
+- **A test double that replaces a collaborator also replaces the check that the
+  collaborator can be built.** Stubs bought speed and offline tests, and quietly
+  sold the wiring. `tests/test_deps.py` now constructs every provider from real
+  `Settings` and asserts every attribute `deps.py` reads exists.
+- **Verify edits applied, do not trust that they did.** A replacement that
+  matches nothing is silent. Every edit in this project should assert on its
+  match; the ones that did caught their failures immediately, the ones that did
+  not caused this.
+- **Line endings are a correctness issue, not a formatting one.** On a Windows
+  checkout, matching `
+` against CRLF fails invisibly.
+- **The same class of bug appeared twice in one session** -- the measurement
+  script hardcoded `GttsSpeech` after I had just fixed it for hardcoding the
+  wrong pipeline. Anything that constructs a collaborator directly, instead of
+  going through the factory the app uses, will drift. It now builds from config
+  and prints which engine it used.

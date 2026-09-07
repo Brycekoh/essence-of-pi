@@ -81,12 +81,36 @@ class Settings(BaseSettings):
     fallback_to_title_card: bool = True
 
     # --- Narration (milestone 5) ---
-    # gTTS needs no key and no quota, which after milestone 4 counts for a lot.
-    # tld changes the accent: com (US), co.uk, com.au.
     # Scenes per concept. Each one costs a model call (plus corrections), so
     # this is the main lever on how fast a free-tier quota disappears.
     max_scenes: int = 3
 
+    # Three engines, none of which spend model quota:
+    #   kokoro  most human, its own 2.88 GB image
+    #   piper   much lighter, lives in the render image
+    #   gtts    no image at all, and sounds like a satnav
+    speech_engine: str = "kokoro"
+
+    # Kokoro lives in a separate image because it needs torch and manim does
+    # not:  docker build -f Dockerfile.kokoro -t essence-of-pi/tts:kokoro .
+    kokoro_image: str = "essence-of-pi/tts:kokoro"
+    kokoro_voice: str = "af_bella"
+    # Kokoro's convention is the inverse of Piper's: below 1.0 is slower.
+    kokoro_speed: float = 0.92
+
+    # Piper only.
+    piper_voice: str = "/opt/voices/en_US-hfc_female-medium.onnx"
+    speech_length_scale: float = 1.12  # >1 is slower
+    # None keeps the voice's own defaults. Lower is steadier, higher is more
+    # expressive and more likely to land an odd emphasis.
+    speech_noise_scale: float | None = None
+    speech_noise_w_scale: float | None = None
+
+    # Both local engines. The pause between sentences is where understanding
+    # happens; gTTS offers none, which is most of why it sounds relentless.
+    speech_sentence_silence: float = 0.35
+
+    # gTTS only. tld changes the accent: com (US), co.uk, com.au.
     speech_lang: str = "en"
     speech_tld: str = "com"
 

@@ -199,3 +199,61 @@ async def test_piper_speaks_for_real(tmp_path):
     assert out.exists() and out.stat().st_size > 10_000
     seconds = await media.duration(out)
     assert 4 < seconds < 20, f"implausible narration length: {seconds}s"
+
+
+def test_kokoro_is_selectable_and_sandboxed(tmp_path):
+    from app.services.speech import KokoroSpeech, build_speech
+
+    kokoro = build_speech(
+        "kokoro",
+        image=IMAGE,
+        voice="unused",
+        sentence_silence=0.35,
+        length_scale=1.0,
+        lang="en",
+        tld="com",
+        memory="1g",
+        cpus="2",
+        docker_bin="docker",
+        kokoro_image="essence-of-pi/tts:kokoro",
+        kokoro_voice="af_bella",
+        kokoro_speed=0.92,
+    )
+    assert isinstance(kokoro, KokoroSpeech)
+
+    argv = kokoro.build_argv(workdir=tmp_path, container="eop-kokoro-test")
+    assert argv[argv.index("--network") + 1] == "none"
+    assert "essence-of-pi/tts:kokoro" in argv
+    assert argv[-3:] == ["af_bella", "0.92", "0.35"], "voice, speed, pause"
+
+
+def _kokoro_available() -> bool:
+    if shutil.which("docker") is None:
+        return False
+    try:
+        return subprocess.run(
+            ["docker", "image", "inspect", "essence-of-pi/tts:kokoro"],
+            capture_output=True,
+            timeout=30,
+        ).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+@pytest.mark.skipif(not _kokoro_available(), reason="needs essence-of-pi/tts:kokoro")
+@pytest.mark.slow
+async def test_kokoro_speaks_for_real(tmp_path):
+    """Offline, no key, and the sentence pause has to actually be there."""
+    from app.services.speech import KokoroSpeech
+
+    media = FfmpegMedia(image=IMAGE)
+    kokoro = KokoroSpeech(image="essence-of-pi/tts:kokoro", voice="af_bella")
+
+    one = await kokoro.say("The weights keep changing.", tmp_path / "one.wav")
+    two = await kokoro.say(
+        "The weights keep changing. Every later layer sees a moving target.",
+        tmp_path / "two.wav",
+    )
+
+    assert one.exists() and two.exists()
+    assert await media.duration(two) > await media.duration(one) + 1.0

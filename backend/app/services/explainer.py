@@ -37,8 +37,11 @@ How a good sequence works: the first scene sets up the question or the problem, 
 the middle scenes develop the mechanism one step at a time, and the last scene \
 lands the idea. Each scene shows one thing. Nothing is repeated.
 
-The narration is spoken aloud, so write it to be heard: plain sentences, no \
-bullet points, no "in this video", no reading formulas out symbol by symbol.\
+The narration is spoken aloud, so write it to be heard. Short sentences, one \
+idea each. A synthesised voice breathes at punctuation and nowhere else, so a \
+long sentence comes out rushed and flat however good the voice is. Avoid \
+subordinate clauses. No bullet points, no "in this video", no reading formulas \
+out symbol by symbol.\
 """
 
 SPLIT_PROMPT = """\
