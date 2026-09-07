@@ -1,5 +1,7 @@
 """The generate-render-correct loop."""
 
+from pathlib import Path
+
 import pytest
 
 from app.models import Concept, ManimScene
@@ -289,3 +291,37 @@ async def test_correction_prompt_carries_the_original_plan(tmp_path):
     correction = llm.calls[1]["prompt"]
     assert "Two vectors rotate apart." in correction
     assert "nudge" in correction
+
+
+async def test_renderer_unavailable_stops_the_loop_immediately(tmp_path):
+    """Docker refusing to start a container is not a prompting problem."""
+    from app.services.render import RenderUnavailable
+
+    llm = StubLLM([scene(), scene(), scene()])
+    renderer = StubRenderer(
+        error=RenderUnavailable("Docker refused to start the container")
+    )
+
+    outcome = await run(llm, renderer, tmp_path, max_attempts=3, fallback=False)
+
+    assert [a.outcome for a in outcome.attempts] == ["renderer-unavailable"]
+    assert len(llm.calls) == 1, "no model call is spent re-asking about a bad mount"
+
+
+def test_bind_mount_source_is_always_absolute(tmp_path, monkeypatch):
+    """A relative -v source is read by Docker as a named volume, not a path."""
+    from app.services.container import build_argv
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "storage").mkdir()
+
+    argv = build_argv(
+        image="img",
+        command=["true"],
+        workdir=Path("storage"),
+        container="eop-test",
+    )
+
+    volume = argv[argv.index("--volume") + 1]
+    source = volume.rsplit(":", 1)[0]
+    assert Path(source).is_absolute(), f"relative mount source would be a volume name: {source}"

@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from .base import RenderError, Renderer, RenderResult, RenderTimeout
+from .base import RenderError, Renderer, RenderResult, RenderTimeout, RenderUnavailable
 from .manim_docker import ManimDockerRenderer
 from .stub import StubRenderer
 
@@ -9,6 +9,7 @@ __all__ = [
     "RenderError",
     "RenderResult",
     "RenderTimeout",
+    "RenderUnavailable",
     "ManimDockerRenderer",
     "StubRenderer",
     "build_renderer",

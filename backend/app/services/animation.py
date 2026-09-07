@@ -25,7 +25,13 @@ from ..models import Concept, ManimScene, RenderAttempt
 from ..scenes import build_card
 from . import codecheck
 from .llm.base import LLMClient, LLMError
-from .render.base import Renderer, RenderError, RenderResult, RenderTimeout
+from .render.base import (
+    Renderer,
+    RenderError,
+    RenderResult,
+    RenderTimeout,
+    RenderUnavailable,
+)
 
 SCENE_NAME = "ConceptScene"
 
@@ -290,6 +296,16 @@ async def animate(
                 destination=destination,
                 timeout=timeout,
             )
+        except RenderUnavailable as exc:
+            # Docker could not start the container at all. No prompt fixes
+            # that, so stop rather than spend two more model calls learning
+            # the same thing.
+            outcome.attempts.append(
+                RenderAttempt(
+                    attempt=attempt, outcome="renderer-unavailable", detail=str(exc)
+                )
+            )
+            break
         except RenderTimeout:
             detail = (
                 f"The render exceeded {timeout:.0f} seconds. Make the animation "

@@ -29,6 +29,15 @@ class RenderTimeout(RenderError):
     """The renderer ran longer than allowed and was killed."""
 
 
+class RenderUnavailable(RenderError):
+    """The renderer could not run at all: no daemon, bad mount, missing image.
+
+    Distinct from `RenderError` because nothing the model writes can fix it.
+    Feeding a Docker configuration error back as a correction prompt spends a
+    model call to receive the same failure again.
+    """
+
+
 @dataclass(frozen=True)
 class RenderResult:
     path: Path

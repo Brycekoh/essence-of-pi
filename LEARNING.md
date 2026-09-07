@@ -391,6 +391,35 @@ more than being right about it.
   same cached concepts: one variable. Without that, prompt changes are just
   opinions with a diff attached.
 
-**Still unmeasured:** the first-attempt render rate, before or after. Three
-runs have now been lost to free-tier quota, a Docker daemon that was not
-running, and a Docker daemon that updated itself overnight.
+### Measured, finally
+
+**2/2 concepts rendered on the first attempt.** Batch Normalization paper,
+`gemini-3.8-flash`, 36s and 59s end to end, 19.4s and 14.1s of video. No
+corrections, no fallbacks.
+
+Getting that number took four attempts, and the last two failures were mine,
+not the provider's:
+
+- **A relative path in a bind mount is a named volume, not a path.** The
+  measure script passed `--out storage/measure`, so `docker run -v
+  storage\measure\...:/work` asked for a *volume called* `storage\measure...`
+  and was refused. Every render failed before manim started. No test caught it
+  because pytest's `tmp_path` is always absolute -- the fixture that makes
+  tests convenient also made them unrepresentative.
+- **Infrastructure failures were being treated as the model's fault.** All
+  three attempts re-prompted the model to fix a Docker configuration error:
+  three model calls, three identical failures, quota gone. There is now a
+  `RenderUnavailable` for "the container could not start", and the loop stops
+  on it instead of arguing with the model about a bad mount.
+
+**What the videos actually look like.** Better than expected: real diagrams,
+LaTeX formulas rendering correctly via `MathTex`, axes with labelled point
+clouds, a decision boundary that moves. Not a title card with a formula pasted
+on it.
+
+**The defect the loop cannot see.** Both videos have overlapping text -- a
+label written on top of another label. The render succeeds, exits zero, and
+produces a valid mp4, so nothing in the correction loop notices. The loop only
+ever sees crashes. Catching a *visual* defect needs a different mechanism
+entirely: rendering a frame and having something look at it. That is the honest
+ceiling on this design, and it took seeing the output to find it.

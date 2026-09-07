@@ -21,7 +21,7 @@ from ..container import CONTAINER_WORKDIR, ContainerError, ContainerTimeout
 from ..container import build_argv as build_container_argv
 from ..container import container_name
 from ..container import run as run_container
-from .base import RenderError, RenderResult, RenderTimeout
+from .base import RenderError, RenderResult, RenderTimeout, RenderUnavailable
 
 # Manim writes to <media_dir>/videos/<source stem>/<resolution>/<Scene>.mp4.
 # The resolution directory name depends on the quality flag, so the output is
@@ -125,4 +125,8 @@ class ManimDockerRenderer:
         except ContainerTimeout as exc:
             raise RenderTimeout(str(exc)) from exc
         except ContainerError as exc:
-            raise RenderError(str(exc), stderr=exc.stderr, exit_code=exc.exit_code) from exc
+            # Docker itself refused: daemon down, bad mount, missing image.
+            # Not something a different scene would survive.
+            raise RenderUnavailable(
+                str(exc), stderr=exc.stderr, exit_code=exc.exit_code
+            ) from exc

@@ -47,13 +47,19 @@ def build_argv(
     Every flag between `--name` and the image is load-bearing: from milestone 4
     the code inside `workdir` is written by a language model.
     """
+    # Absolute, always. Docker reads a *relative* -v source as the name of a
+    # named volume rather than a path to bind, and then rejects it for having
+    # invalid characters. Tests never caught this because pytest's tmp_path is
+    # already absolute; a relative --out on the command line is not.
+    source = Path(workdir).resolve()
+
     argv = [
         docker_bin, "run", "--rm",
         "--name", container,
         "--network", "none",
         "--memory", memory,
         "--cpus", cpus,
-        "--volume", f"{workdir}:{CONTAINER_WORKDIR}",
+        "--volume", f"{source}:{CONTAINER_WORKDIR}",
         # Make the mount the working directory. Without this the image's own
         # WORKDIR wins and relative paths like `scene.py` resolve somewhere
         # the mounted files are not.
@@ -104,12 +110,22 @@ async def run(
         raise ContainerTimeout(f"Exceeded {timeout:.0f}s and was killed.")
 
     stderr = err.decode("utf-8", "replace")
-    if process.returncode != 0 and "Cannot connect to the Docker daemon" in stderr:
-        raise ContainerError(
-            "The Docker daemon is not running. Start Docker Desktop and retry.",
-            stderr=stderr,
-            exit_code=process.returncode,
-        )
+    if process.returncode != 0:
+        if "Cannot connect to the Docker daemon" in stderr:
+            raise ContainerError(
+                "The Docker daemon is not running. Start Docker Desktop and retry.",
+                stderr=stderr,
+                exit_code=process.returncode,
+            )
+        # The daemon refused to *start* the container -- a bad mount, a missing
+        # image, an unusable flag. The program inside never ran, so this is our
+        # problem and not the program's. Docker prefixes these itself.
+        if stderr.lstrip().startswith("docker:") or "Error response from daemon" in stderr:
+            raise ContainerError(
+                f"Docker refused to start the container: {stderr.strip().splitlines()[0]}",
+                stderr=stderr,
+                exit_code=process.returncode,
+            )
 
     return out.decode("utf-8", "replace"), stderr, process.returncode or 0
 
