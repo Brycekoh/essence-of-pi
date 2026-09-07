@@ -1,5 +1,5 @@
 import { PaperList } from "./components/paper-list";
-import { SphereCanvas } from "./components/sphere-canvas";
+import { SphereCanvas, type BackgroundVariant } from "./components/sphere-canvas";
 import { Uploader } from "./components/uploader";
 
 const FEATURES = [
@@ -20,10 +20,24 @@ const FEATURES = [
 // Entrances are timed to land after the sphere has grown in (2.5s).
 const AFTER_INTRO = 2.0;
 
-export default function Home() {
+const VARIANTS: BackgroundVariant[] = ["glass", "chrome", "smoke", "ring", "horizon"];
+
+// `?bg=chrome` previews an alternative background without a code change.
+// Reading searchParams makes this page dynamically rendered, which is fine:
+// everything on it is client-fetched anyway.
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ bg?: string }>;
+}) {
+  const { bg } = await searchParams;
+  const variant = VARIANTS.includes(bg as BackgroundVariant)
+    ? (bg as BackgroundVariant)
+    : "glass";
+
   return (
     <div className="relative min-h-screen overflow-hidden">
-      <SphereCanvas introSeconds={2.5} />
+      <SphereCanvas introSeconds={2.5} variant={variant} />
       {/* Darkens the sphere where text sits, fading in once it has appeared. */}
       <div
         className="animate-fade pointer-events-none fixed inset-0 z-0 bg-gradient-to-b from-black/50 via-black/25 to-black/60"

@@ -2,14 +2,25 @@
 
 import { useEffect, useRef } from "react";
 
-// The centrepiece: a glass sphere that fades and grows in over the first
-// couple of seconds, then slowly turns. It sits behind the upload panel and
-// reads as refracted light -- a swirling monochrome texture with a touch of
-// chromatic split at the edges, a bright fresnel rim, and a soft halo.
+// The centrepiece behind the landing page. Several looks share one shader and
+// one quad; `variant` picks the branch. All of them are monochrome with a
+// touch of chromatic split, fade and grow in over the intro, then move very
+// slowly. Contrast stays low because text and panels sit on top.
 //
-// One fragment shader on a quad. No raymarching: the "sphere" is a disc whose
-// surface normal is reconstructed from its radius, which is all the lighting
-// needs and a fraction of the cost.
+//   glass   a refractive orb -- the default
+//   chrome  the same orb as liquid metal: smooth bands, hard highlights
+//   smoke   no orb; slow ink rising through a soft spotlight
+//   ring    a thin luminous lens ring, the most minimal
+//   horizon a perspective grid running to a glowing horizon
+
+export type BackgroundVariant = "glass" | "chrome" | "smoke" | "ring" | "horizon";
+const VARIANT_INDEX: Record<BackgroundVariant, number> = {
+  glass: 0,
+  chrome: 1,
+  smoke: 2,
+  ring: 3,
+  horizon: 4,
+};
 
 const VERTEX = `
 attribute vec2 a_pos;
@@ -20,7 +31,8 @@ const FRAGMENT = `
 precision highp float;
 uniform vec2  u_res;
 uniform float u_time;
-uniform float u_intro;   // 0 -> 1 over the intro
+uniform float u_intro;
+uniform int   u_variant;
 
 float hash(vec2 p) {
   p = fract(p * vec2(127.1, 311.7));
@@ -40,69 +52,118 @@ float fbm(vec2 p) {
   return v;
 }
 
-// The texture seen through the glass, sampled at a warped position so it
-// looks bent by the surface rather than painted on it.
-float lens(vec2 uv, float z, float t, float shift) {
+// Texture seen through the orb, sampled at a warped position so it looks bent
+// by the surface. When metal is set, noise is swapped for smooth bands.
+float lens(vec2 uv, float z, float t, float shift, bool metal) {
   float bend = 1.0 + 0.45 * (1.0 - z);
   vec2 q = uv * bend;
   float c = cos(t * 0.12), s = sin(t * 0.12);
-  q = mat2(c, -s, s, c) * q;
-  q += shift;
+  q = mat2(c, -s, s, c) * q + shift;
+  if (metal) {
+    float w = fbm(q * 1.3 + t * 0.04) * 2.0;
+    return 0.5 + 0.5 * sin(q.x * 6.0 + w * 3.0 + t * 0.2);
+  }
   float w = fbm(q * 2.2 + t * 0.05);
   return fbm(q * 3.5 + w * 1.6 - t * 0.03);
 }
 
-void main() {
-  vec2 p = (gl_FragCoord.xy - 0.5 * u_res) / u_res.y;
-  p.y += 0.06;   // sit a little low, behind the panel
-
-  float intro = smoothstep(0.0, 1.0, u_intro);
-  float R = 0.52 * (0.6 + 0.4 * intro);
-  float d = length(p);
-
+vec3 orb(vec2 p, float R, float t, float intro, bool metal) {
   vec3 col = vec3(0.0);
-
-  // Halo outside the sphere: soft, wide, slightly cool.
-  float halo = exp(-max(d - R, 0.0) * 6.0) * 0.55;
-  col += vec3(0.85, 0.9, 1.0) * halo * intro;
-
+  float d = length(p);
+  float halo = exp(-max(d - R, 0.0) * 6.0) * (metal ? 0.4 : 0.5);
+  col += vec3(0.85, 0.9, 1.0) * halo;
   if (d < R) {
     vec2 uv = p / R;
-    float z = sqrt(max(0.0, 1.0 - dot(uv, uv)));   // surface normal z
-    float t = u_time;
-
-    // Chromatic split: three samples, offset a little more toward the rim.
+    float z = sqrt(max(0.0, 1.0 - dot(uv, uv)));
     float rim = 1.0 - z;
     float ab = 0.012 + 0.03 * rim;
-    float r = lens(uv, z, t, ab);
-    float g = lens(uv, z, t, 0.0);
-    float b = lens(uv, z, t, -ab);
-    vec3 tex = vec3(r, g, b);
-    tex = smoothstep(0.25, 0.85, tex);           // crisp facets, not mud
-    tex = mix(vec3(dot(tex, vec3(0.333))), tex, 0.55);  // mostly monochrome
-
-    // Lighting: a key light up-left, a fresnel rim, a specular highlight.
+    vec3 tex = vec3(lens(uv, z, t, ab, metal), lens(uv, z, t, 0.0, metal), lens(uv, z, t, -ab, metal));
+    tex = metal ? smoothstep(0.15, 0.95, tex) : smoothstep(0.25, 0.85, tex);
+    tex = mix(vec3(dot(tex, vec3(0.333))), tex, metal ? 0.35 : 0.55);
     vec3 n = vec3(uv, z);
     vec3 l = normalize(vec3(-0.45, 0.6, 0.65));
     float diff = 0.35 + 0.65 * max(dot(n, l), 0.0);
     float fres = pow(rim, 2.5);
-    float spec = pow(max(dot(reflect(-l, n), vec3(0, 0, 1)), 0.0), 40.0);
-
-    // Kept dim: text and panels sit on top of this, and the rim is what
-    // should read, not the interior.
-    vec3 body = tex * diff * 0.5 + vec3(0.9, 0.95, 1.0) * fres * 0.85 + spec * 0.5;
-    // Anti-aliased edge.
-    float edge = smoothstep(R, R - 0.004, d);
-    col = mix(col, body, edge);
+    float spec = pow(max(dot(reflect(-l, n), vec3(0, 0, 1)), 0.0), metal ? 90.0 : 40.0);
+    vec3 body = tex * diff * (metal ? 0.65 : 0.5)
+              + vec3(0.9, 0.95, 1.0) * fres * 0.85
+              + spec * (metal ? 1.2 : 0.5);
+    col = mix(col, body, smoothstep(R, R - 0.004, d));
   }
+  return col * intro;
+}
 
-  // Fade the whole thing in with the intro.
-  col *= intro;
+vec3 smoke(vec2 p, float t, float intro) {
+  // Ink rising slowly through a spotlight from above.
+  vec2 q = p * 1.4 + vec2(0.0, -t * 0.06);
+  float w = fbm(q * 1.5 + vec2(t * 0.03, 0.0));
+  float f = fbm(q * 2.2 + w * 1.8);
+  f = smoothstep(0.35, 0.9, f);
+  float spot = exp(-length(p * vec2(1.0, 1.6)) * 1.8);
+  float ab = 0.01;
+  float fr = smoothstep(0.35, 0.9, fbm(q * 2.2 + w * 1.8 + ab));
+  float fb = smoothstep(0.35, 0.9, fbm(q * 2.2 + w * 1.8 - ab));
+  vec3 col = vec3(fr, f, fb) * spot * 0.55 + vec3(0.02) * spot;
+  return col * intro;
+}
+
+vec3 ring(vec2 p, float t, float intro) {
+  float R = 0.48 * (0.7 + 0.3 * intro);
+  float d = abs(length(p) - R);
+  float core = exp(-d * 120.0);
+  float glow = exp(-d * 9.0) * 0.5;
+  float ab = 0.006;
+  float r = exp(-abs(length(p) - R - ab) * 120.0);
+  float b = exp(-abs(length(p) - R + ab) * 120.0);
+  // A slow-moving bright arc so it is not static.
+  float a = atan(p.y, p.x);
+  float arc = 0.5 + 0.5 * cos(a - t * 0.3);
+  vec3 col = vec3(r, core, b) * (0.5 + 0.7 * arc) + vec3(0.85, 0.9, 1.0) * glow * (0.6 + 0.4 * arc);
+  col += vec3(0.02) * exp(-length(p) * 1.5);
+  return col * intro;
+}
+
+vec3 horizon(vec2 p, float t, float intro) {
+  // Perspective floor grid running to a glowing horizon just above centre.
+  float hy = 0.12;
+  vec3 col = vec3(0.0);
+  float glow = exp(-abs(p.y - hy) * 9.0) * 0.35;
+  col += vec3(0.85, 0.9, 1.0) * glow;
+  if (p.y < hy) {
+    float depth = hy - p.y;
+    float z = 0.12 / max(depth, 0.001);
+    vec2 g = vec2(p.x * z * 2.2, z - t * 0.25);
+    vec2 f = abs(fract(g) - 0.5);
+    float line = min(f.x, f.y);
+    float grid = 1.0 - smoothstep(0.0, 0.03 + 0.06 * depth, line);
+    float fade = exp(-depth * 3.5) * smoothstep(0.0, 0.05, depth);
+    col += vec3(0.9) * grid * fade * 0.45;
+  }
+  return col * intro;
+}
+
+void main() {
+  vec2 p = (gl_FragCoord.xy - 0.5 * u_res) / u_res.y;
+  p.y += 0.06;
+  float intro = smoothstep(0.0, 1.0, u_intro);
+  float t = u_time;
+  vec3 col;
+  if (u_variant == 0)      col = orb(p, 0.52 * (0.6 + 0.4 * intro), t, intro, false);
+  else if (u_variant == 1) col = orb(p, 0.52 * (0.6 + 0.4 * intro), t, intro, true);
+  else if (u_variant == 2) col = smoke(p, t, intro);
+  else if (u_variant == 3) col = ring(p, t, intro);
+  else                     col = horizon(p, t, intro);
   gl_FragColor = vec4(col, 1.0);
 }
 `;
 
-export function SphereCanvas({ introSeconds = 2.5 }: { introSeconds?: number }) {
+export function SphereCanvas({
+  introSeconds = 2.5,
+  variant = "glass",
+}: {
+  introSeconds?: number;
+  variant?: BackgroundVariant;
+}) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -141,6 +202,8 @@ export function SphereCanvas({ introSeconds = 2.5 }: { introSeconds?: number }) 
     const uRes = gl.getUniformLocation(program, "u_res");
     const uTime = gl.getUniformLocation(program, "u_time");
     const uIntro = gl.getUniformLocation(program, "u_intro");
+    const uVariant = gl.getUniformLocation(program, "u_variant");
+    gl.uniform1i(uVariant, VARIANT_INDEX[variant] ?? 0);
 
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -176,7 +239,7 @@ export function SphereCanvas({ introSeconds = 2.5 }: { introSeconds?: number }) 
       document.removeEventListener("visibilitychange", onVisibility);
       gl.deleteProgram(program);
     };
-  }, [introSeconds]);
+  }, [introSeconds, variant]);
 
   return (
     <canvas
