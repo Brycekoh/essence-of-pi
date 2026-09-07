@@ -470,3 +470,39 @@ says so next to the feature rather than in a footnote.
 - Parallel scenes mean parallel model calls, which burns the free-tier quota
   faster and invites the 503s from the interlude. `max_parallel_renders` is
   the lever and it defaults to 2.
+
+
+---
+
+## Interlude — the measurement tool was measuring the past
+
+Sent two generated videos over as evidence that milestone 4 works. The reply:
+"I cannot hear the narration?"
+
+There was no narration. `ffprobe` on both files: one stream, video. No audio
+track at all.
+
+**What had happened.** `scripts/measure_generation.py` was written during
+milestone 4 and calls `animate_concept` -- the single-scene loop, no narration,
+no mux. Milestone 5 added `build_explainer` and made that the product. The
+script was never updated, so it kept exercising a code path that had stopped
+being the thing the API builds two milestones earlier.
+
+Every number it produced about the *generation loop* was still true. The claim
+it implied -- "this is what the system makes" -- was not.
+
+**Things I learned**
+
+- **A measurement tool not wired to the product measures the past.** It fails
+  silently, because it still runs, still passes, still prints a number. The
+  test suite cannot catch this: both code paths work, they are just not the
+  same path.
+- **Ship the artefact, not the summary.** The gap survived a green suite, a
+  passing integration test and my own review. It did not survive someone
+  pressing play. When the deliverable is a file, look at the file.
+- **The fix is a default, not a flag.** The script now runs the real pipeline
+  by default, with `--single-scene` to isolate the generation loop. Making the
+  product path opt-in is how it drifted in the first place.
+
+**Verified after the fix:** Internal Covariate Shift, 2 scenes, 32.7s, h264
+plus aac, both scenes generated first attempt, 144 seconds to build.

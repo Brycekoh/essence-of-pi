@@ -26,9 +26,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.config import get_settings  # noqa: E402
 from app.services.animation import animate_concept  # noqa: E402
 from app.services.concepts import extract_concepts  # noqa: E402
+from app.services.explainer import build_explainer  # noqa: E402
 from app.services.llm import build_llm  # noqa: E402
+from app.services.media import FfmpegMedia  # noqa: E402
 from app.services.pdf_parser import extract_pages  # noqa: E402
 from app.services.render import ManimDockerRenderer  # noqa: E402
+from app.services.speech import GttsSpeech  # noqa: E402
 from app.models import Paper  # noqa: E402
 
 
@@ -36,6 +39,12 @@ async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pdf", type=Path)
     parser.add_argument("--concepts", type=int, default=3)
+    parser.add_argument(
+        "--single-scene",
+        action="store_true",
+        help="measure the raw animation loop only: one scene, no narration",
+    )
+    parser.add_argument("--scenes", type=int, default=2, help="scenes per concept")
     parser.add_argument("--quality", default="-ql", help="-ql fast, -qm nicer")
     parser.add_argument("--out", type=Path, default=Path("storage/measure"))
     parser.add_argument(
@@ -48,6 +57,8 @@ async def main() -> int:
     settings = get_settings()
     llm = build_llm(settings.gemini_api_key, settings.llm_models_csv)
     renderer = ManimDockerRenderer(image=settings.renderer_image, quality=args.quality)
+    media = FfmpegMedia(image=settings.renderer_image)
+    speech = GttsSpeech(lang=settings.speech_lang, tld=settings.speech_tld)
     args.out.mkdir(parents=True, exist_ok=True)
 
     print(f"models  : {settings.llm_models_csv}")
@@ -90,26 +101,64 @@ async def main() -> int:
     for i, concept in enumerate(concepts[: args.concepts], start=1):
         destination = args.out / f"{i:02d}-{concept.id[:8]}.mp4"
         started = time.monotonic()
-        outcome = await animate_concept(
-            llm,
-            renderer,
-            concept,
-            destination,
-            max_attempts=settings.max_render_attempts,
-            timeout=settings.render_timeout_seconds,
-        )
-        elapsed = time.monotonic() - started
-        steps = [a.outcome for a in outcome.attempts]
 
+        if args.single_scene:
+            # The milestone-4 path: one animation, no narration, no mux. Useful
+            # for measuring the generate-correct loop in isolation.
+            outcome = await animate_concept(
+                llm,
+                renderer,
+                concept,
+                destination,
+                max_attempts=settings.max_render_attempts,
+                timeout=settings.render_timeout_seconds,
+            )
+            steps = [a.outcome for a in outcome.attempts]
+            generated = outcome.generated
+            plan = outcome.plan
+            detail_lines = [
+                (a.attempt, a.outcome, a.detail) for a in outcome.attempts
+            ]
+        else:
+            # The actual product: split, narrate, measure, animate to fit, mux,
+            # concatenate. This is what the API builds.
+            explainer = await build_explainer(
+                llm,
+                renderer,
+                speech,
+                media,
+                concept,
+                destination,
+                workdir=args.out / f".scenes{i:02d}",
+                max_scenes=args.scenes,
+                max_attempts=settings.max_render_attempts,
+                timeout=settings.render_timeout_seconds,
+                progress=lambda e: print(f"    .. {e.stage}: {e.message}"),
+            )
+            steps = [
+                a.outcome
+                for s in explainer.scenes
+                if s.animation
+                for a in s.animation.attempts
+            ]
+            generated = explainer.path is not None
+            plan = f"{len(explainer.scenes)} scenes, {explainer.seconds:.1f}s"
+            detail_lines = [
+                (s.index, "generated" if s.generated else "carded", s.note)
+                for s in explainer.scenes
+            ]
+
+        elapsed = time.monotonic() - started
         print(f"[{i}] {concept.name}  ({elapsed:.0f}s)")
-        if outcome.plan:
-            print(f"    plan: {outcome.plan[:150]}")
-        for attempt in outcome.attempts:
-            detail = (attempt.detail or "").replace("\n", " | ")[:180]
-            print(f"    {attempt.attempt}. {attempt.outcome}  {detail}")
+        if plan:
+            print(f"    {plan[:150]}")
+        for index, label, detail in detail_lines:
+            text = " | ".join((detail or "").splitlines())[:180]
+            print(f"    {index}. {label}  {text}")
         size = destination.stat().st_size if destination.exists() else 0
-        print(f"    generated={outcome.generated}  {size} bytes -> {destination}\n")
-        rows.append((concept.name, steps, outcome.generated))
+        print(f"    generated={generated}  {size} bytes -> {destination}")
+        print()
+        rows.append((concept.name, steps, generated))
 
     total = len(rows)
     if not total:
