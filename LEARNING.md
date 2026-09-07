@@ -618,3 +618,43 @@ returned a 500.
   wrong pipeline. Anything that constructs a collaborator directly, instead of
   going through the factory the app uses, will drift. It now builds from config
   and prints which engine it used.
+
+
+---
+
+## Milestone 7 — Frontend
+
+**Built:** a Next.js app. Upload a PDF, open a paper, extract concepts, click
+Build on a concept, watch the stages go by, play the result inline.
+
+**Verified in a browser, not just compiled:** uploaded the Batch Norm paper,
+extracted six concepts, built one, watched "Narrating 3 scenes" become
+"Animating scene 3 of 3" become a video player at 0:38. The pipeline behind
+that was already tested; what this proved is that the wiring to a real
+`EventSource` and a real `<video>` element works.
+
+**Things I learned**
+
+- **Read the bundled docs.** This Next.js version ships its documentation in
+  `node_modules` and a note saying the framework has changed from what a model
+  was trained on. It had: `params` is now a Promise you await. Ten minutes of
+  reading beat an hour of debugging a stale mental model.
+- **Everything runs in the browser, on purpose.** The backend is local, it
+  already allows this origin, and the progress stream is an `EventSource` --
+  which only exists in a browser. One client-side model was simpler than
+  splitting fetches between server and client components for no gain.
+- **Show the stage, not a percentage.** The stages are wildly different
+  lengths. A bar that sits at 40% for two minutes says less than "animating
+  scene 2 of 3".
+- **Replay makes late subscribers free.** Because the server replays a job's
+  recorded events before streaming live ones, the card can subscribe from an
+  empty list every time -- including when it joins a build that is already
+  half done.
+- **A UI would have caught the silent-audio bug on day one.** It has a
+  `<video>` element and nowhere to hide a missing track. The measurement
+  script could print "generated=True" over a silent file for days; a person
+  pressing play in a browser cannot be fooled the same way.
+
+**Types are kept by hand.** Six interfaces mirroring the pydantic models.
+Reading them is faster than reading a generator's output, and they drift only
+when the API does -- which is when a person should be looking anyway.

@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+/* The same palette the rendered videos use, so the app and its output look
+   like they belong to each other. Dark only, on purpose: this is what
+   3blue1brown looks like, and a light mode would be a different product. */
+@theme {
+  --color-bg: #0e1116;
+  --color-panel: #161b22;
+  --color-panel-2: #1c2330;
+  --color-line: #232b36;
+  --color-fg: #d7dce2;
+  --color-muted: #8b95a1;
+  --color-accent: #58c4dd;
+  --color-accent-dim: #3a6a7a;
+  --color-warm: #c98b6b;
+  --color-ok: #7bd389;
+  --color-bad: #e07a7a;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Native video controls, tinted to match. */
+video {
+  background: #000;
+  border-radius: 0.5rem;
+}

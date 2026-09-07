@@ -100,6 +100,17 @@ uvicorn app.main:app --reload
 
 Interactive API docs: <http://localhost:8000/docs>
 
+**Frontend** (needs the backend running):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then <http://localhost:3000>. Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local`
+if the backend is not on `localhost:8000`.
+
 Tests -- `.\.venv\Scripts\pytest.exe` on Windows, `pytest` once activated
 elsewhere:
 
@@ -127,7 +138,8 @@ docker compose up --build
 - [x] **6 — Concurrency and progress.** Builds run off the request path, scenes
       render in parallel under a global cap, progress streams over SSE.
       *In-process, single worker* — see the note in Design notes.
-- [ ] **7 — Frontend.** Next.js: upload, browse concepts, watch clips.
+- [x] **7 — Frontend.** Next.js: upload, browse concepts, build with live
+      progress, watch clips inline.
 - [ ] **8 — Persistence and deploy.** Postgres, object storage, auth, shipped.
 
 ## Design notes
