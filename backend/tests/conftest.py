@@ -9,7 +9,7 @@ from app.services.media import StubMedia
 from app.services.render import StubRenderer
 from app.services.speech import StubSpeech
 from app.services.jobs import JobRegistry, get_registry
-from app.services.store import PaperStore, get_store
+from app.services.store import InMemoryPaperStore, get_store
 
 from .pdf_fixture import make_pdf
 
@@ -62,7 +62,7 @@ def client(settings, stub_llm, stub_renderer, stub_speech, stub_media, registry)
     tests isolated from each other -- each one gets an empty store and a fresh
     stub, and no test can reach the network by accident.
     """
-    store = PaperStore(settings.upload_dir, settings.videos_dir)
+    store = InMemoryPaperStore(settings.upload_dir, settings.videos_dir)
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_store] = lambda: store
     app.dependency_overrides[provide_llm] = lambda: stub_llm

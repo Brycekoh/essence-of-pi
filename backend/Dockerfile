@@ -1,25 +1,34 @@
-# Python 3.12, not 3.13: the rendering stack added in later milestones
-# (manim, moviepy) is only reliably packaged for 3.12.
+# The API server, for docker compose.
+#
+# It renders nothing itself. It starts render, ffmpeg and speech containers on
+# the host's Docker daemon through a mounted socket, so it needs the docker
+# *CLI* -- copied as a single static binary -- and not a daemon of its own.
 FROM python:3.12-slim
 
-WORKDIR /app
+COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
 
-# Kept minimal on purpose. ffmpeg and a LaTeX distribution get added in the
-# milestone that actually renders video -- adding them now would mean waiting
-# on a 2 GB image build to test a PDF upload.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl \
  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini .
 
-RUN mkdir -p storage/uploads
+# Storage lives in a named volume mounted at /data, so sandboxes can be handed
+# sub-directories of it. See app/services/container.py.
+ENV STORAGE_ROOT=/data \
+    UPLOAD_DIR=/data/uploads \
+    VIDEOS_DIR=/data/videos
 
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s \
   CMD curl -fsS http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# One worker, deliberately: jobs live in this process's memory.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

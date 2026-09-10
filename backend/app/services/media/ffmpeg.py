@@ -18,6 +18,7 @@ from ..container import (
     ContainerTimeout,
     build_argv,
     container_name,
+    make_scratch,
 )
 from ..container import run as run_container
 from .base import MediaError, MediaTimeout
@@ -182,7 +183,7 @@ class _scratch:
     def __enter__(self) -> Path:
         self.near.mkdir(parents=True, exist_ok=True)
         self.path = self.near / f".media-{container_name('')[1:]}"
-        self.path.mkdir(parents=True, exist_ok=True)
+        make_scratch(self.path)
         return self.path
 
     def __exit__(self, *exc) -> None:

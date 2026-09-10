@@ -23,7 +23,7 @@ import shutil
 from pathlib import Path
 
 from ..container import CONTAINER_WORKDIR, ContainerError, ContainerTimeout
-from ..container import build_argv, container_name
+from ..container import build_argv, container_name, make_scratch
 from ..container import run as run_container
 from .base import SpeechError
 
@@ -95,7 +95,7 @@ class PiperSpeech:
 
         destination.parent.mkdir(parents=True, exist_ok=True)
         work = destination.parent / f".tts-{container_name('')[1:]}"
-        work.mkdir(parents=True, exist_ok=True)
+        make_scratch(work)
 
         try:
             # Piper reads a file rather than stdin: `container.run` does not

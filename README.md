@@ -5,10 +5,11 @@ Research papers, distilled into 3blue1brown-style explainers.
 Upload a paper, get back the handful of ideas that actually matter, and turn any
 of them into a short narrated animation.
 
-> **Status: milestone 7 of 8.** The whole pipeline works end to end, with a web
-> UI in front of it. What's left is persistence — restart the backend and the
-> paper list is empty. This is a learning build, in public, one milestone per
-> commit; [LEARNING.md](LEARNING.md) is the running log, including the mistakes.
+> **Status: all eight milestones done.** `docker compose up --build` brings up
+> the whole thing — Postgres, the backend, the frontend and both sandbox images
+> — and papers, concepts and videos survive restarts. This is a learning build,
+> in public, one milestone per commit; [LEARNING.md](LEARNING.md) is the running
+> log, including the mistakes.
 
 ## Demo
 
@@ -23,7 +24,7 @@ of them into a short narrated animation.
 Generated from [Batch Normalization](https://arxiv.org/abs/1502.03167) (11 pages)
 with no human input beyond dropping the PDF in: the model chose the concept,
 split it into three scenes, wrote the narration, wrote the Manim, and all three
-scenes rendered on the first attempt. 38 seconds of video, 89 seconds to build.
+scenes rendered on the first attempt. 38 seconds of video, 110 seconds to build.
 
 ## How it works
 
@@ -47,16 +48,42 @@ three attempts, then degrades to a title card carrying that scene's narration. A
 scene that cannot be built is skipped rather than sinking the video.
 
 Builds run off the request path: `POST` returns `202` with a job, and progress
-streams to the browser over server-sent events.
+streams to the browser over server-sent events. Papers, pages and concepts live
+in Postgres; PDFs and videos live in a Docker volume.
 
-**110 tests**, and all but three run with no API key, no network and no Docker.
+**159 tests**, including one suite run against three storage implementations.
 
 ## Run it
 
-### 1. Build the two images (once)
+### With docker compose
 
-Everything that renders, narrates or muxes runs in a container. Nothing is
-installed on the host — no manim, no ffmpeg, no LaTeX, no speech model.
+```bash
+cp backend/.env.example backend/.env    # then add GEMINI_API_KEY
+docker compose up --build
+```
+
+Then <http://localhost:3000>. A free Gemini key comes from
+[AI Studio](https://aistudio.google.com/apikey).
+
+The first build takes a while — the render and narration images are ~3 GB each.
+After that `docker compose up` starts in seconds, in dependency order: Postgres
+becomes healthy, migrations run and exit, both sandbox images are confirmed, and
+only then does the backend start.
+
+Your data lives in two volumes. `docker compose down` keeps them;
+`docker compose down -v` deletes every paper and video.
+
+> **Security, stated plainly.** The backend mounts the Docker socket so it can
+> start render containers, which gives it root-equivalent control of Docker on
+> your machine. The containers it starts are still sandboxed — no network,
+> capped memory and CPU, each seeing only its own scratch directory — but the
+> backend itself is trusted. Fine on your own machine. Don't expose port 8000 to
+> a network you don't control.
+
+### On the host, for development
+
+**1. Build the two sandbox images once.** Everything that renders, narrates or
+muxes runs in a container; nothing is installed on the host.
 
 ```bash
 cd backend
@@ -65,21 +92,15 @@ docker build -f Dockerfile.render -t essence-of-pi/render:latest .
 docker build -f Dockerfile.kokoro -t essence-of-pi/tts:kokoro .
 ```
 
-- **`essence-of-pi/render`** (~2.9 GB) adds ffmpeg and a Piper voice to the
-  manim image. The upstream image has no ffmpeg *binary* — manim 0.21 renders
-  through PyAV's bundled libav — so narration could not be muxed on it.
-- **`essence-of-pi/tts:kokoro`** (~2.9 GB) is the default narrator. It needs
-  torch and manim does not, so it is a separate image rather than another 3 GB
-  on every render. Set `SPEECH_ENGINE=piper` to skip it, or `gtts` to skip both.
+- **`essence-of-pi/render`** adds ffmpeg and a Piper voice to the manim image.
+  The upstream image has no ffmpeg *binary* — manim 0.21 renders through PyAV's
+  bundled libav — so narration could not be muxed on it.
+- **`essence-of-pi/tts:kokoro`** is the default narrator. It needs torch and
+  manim does not, so it is a separate image. `SPEECH_ENGINE=piper` skips it.
 
-Both run with `--network none`; model weights and voices are baked in at build
-time, because a container with no network cannot fetch them.
-
-### 2. Backend
-
-**Windows (PowerShell).** `&&` is not a valid statement separator in Windows
-PowerShell 5.1, and activating a venv can trip the execution policy — so call
-the venv's executables directly:
+**2. Backend.** On Windows PowerShell, call the venv's executables directly —
+`&&` is not a statement separator in PowerShell 5.1, and activation can trip the
+execution policy:
 
 ```powershell
 cd backend
@@ -88,7 +109,7 @@ python -m venv .venv
 .\.venv\Scripts\uvicorn.exe app.main:app --reload
 ```
 
-**macOS / Linux:**
+macOS / Linux:
 
 ```bash
 cd backend
@@ -97,15 +118,18 @@ pip install -r requirements-dev.txt
 uvicorn app.main:app --reload
 ```
 
-Copy `backend/.env.example` to `backend/.env` and add a `GEMINI_API_KEY`
-([free from AI Studio](https://aistudio.google.com/apikey)). Without one the app
-still boots and serves papers; the LLM routes return `503` explaining what to
-set. Interactive API docs: <http://localhost:8000/docs>.
+Without `DATABASE_URL` the backend uses an in-memory store — no setup, and a
+restart forgets everything. To persist, point it at Postgres and create the
+schema once:
 
-**Run a single worker.** Jobs live in the process's memory, so a second worker
-would not see them.
+```bash
+export DATABASE_URL=postgresql+psycopg://eop:eop@localhost:5432/essence_of_pi
+alembic upgrade head
+```
 
-### 3. Frontend
+**Run a single worker** either way: jobs live in the process's memory.
+
+**3. Frontend.**
 
 ```bash
 cd frontend
@@ -113,9 +137,9 @@ npm install
 npm run dev
 ```
 
-Then <http://localhost:3000>. Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local`
-if the backend is not on `localhost:8000`. The landing page's background can be
-switched with `?bg=` — `ring` (default), `glass`, `chrome`, `smoke`, `horizon`.
+Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local` if the backend isn't on
+`localhost:8000`. The landing background switches with `?bg=` — `ring`
+(default), `glass`, `chrome`, `smoke`, `horizon`.
 
 ### Tests
 
@@ -123,31 +147,37 @@ switched with `?bg=` — `ring` (default), `glass`, `chrome`, `smoke`, `horizon`
 cd backend && pytest
 ```
 
-`.\.venv\Scripts\pytest.exe` on Windows. Three tests run manim, ffmpeg and
-Kokoro for real and skip themselves when Docker or an image is missing.
+The storage contract suite and the migration tests also run against a real
+Postgres when one is listening on `TEST_DATABASE_URL` (default
+`localhost:55432`), and skip that leg otherwise:
+
+```bash
+docker run -d --name eop-pg-test -e POSTGRES_USER=eop -e POSTGRES_PASSWORD=eop \
+  -e POSTGRES_DB=eop_test -p 55432:5432 postgres:17-alpine
+```
+
+A few tests run manim, ffmpeg and Kokoro for real and skip themselves when
+Docker or an image is missing.
 
 ### Measuring the generation loop
 
-The number that says whether milestone 4 works is how often the model's first
-attempt renders. Nothing else about the loop is more than a guess without it:
+How often the model's first attempt renders is the number that says whether
+generation works:
 
 ```bash
 cd backend
 .venv/Scripts/python.exe scripts/measure_generation.py path/to/paper.pdf --concepts 2
 ```
 
-It builds the real pipeline by default and prints which engine it used.
-`--single-scene` isolates the raw generation loop.
-
 ## Free-tier reality check
 
 Gemini's free tier allows **20 requests per day, per model**. Concept extraction
-costs one; a video costs one to three *per scene*. The client therefore rotates
-through `LLM_FALLBACK_MODELS` rather than retrying one model, since the quota is
-per-model, and it remembers which models returned `429`.
+costs one; a video costs one to three *per scene*. The client rotates through
+`LLM_FALLBACK_MODELS` rather than retrying one model, since the quota is
+per-model, and remembers which models returned `429`.
 
-`MAX_SCENES` is the main lever on how fast that budget disappears. Narration and
-rendering cost nothing — they are local.
+`MAX_SCENES` is the main lever on how fast that budget disappears. Narration,
+rendering and storage cost nothing — they are local.
 
 ## API
 
@@ -185,12 +215,12 @@ timeout → `504`, readable PDF that yields nothing → `422`.
       animated to that measured length, muxed and concatenated.
 - [x] **6 — Concurrency and progress.** Builds run off the request path, scenes
       render in parallel under a global cap, progress streams over SSE.
-      *In-process, single worker* — see Design notes.
 - [x] **7 — Frontend.** Next.js: upload, browse concepts, build with live
       progress, watch clips inline.
-- [ ] **8 — Persistence and deploy.** Postgres behind `PaperStore`, and a single
-      `docker compose up` that brings the whole thing up. The compose file in
-      the repo root is a milestone-1 stub and does not yet do this.
+- [x] **8 — Persistence and deploy.** Postgres behind `PaperStore` with Alembic
+      migrations, and one `docker compose up` for the whole stack. "Deploy"
+      means your own machine, deliberately — this is a personal tool, not a
+      hosted service.
 
 ## Design notes
 
@@ -204,9 +234,40 @@ timeout → `504`, readable PDF that yields nothing → `422`.
   signature buys nothing if the body blocks.
 - **Empty pages are kept, not dropped.** A scanned or figure-only page yields an
   empty string, so page numbers always match the source document.
-- **Storage sits behind one interface.** `PaperStore` is in-memory today and
-  loses everything on restart — a deliberate shortcut, and confining it to one
-  class is what makes milestone 8 a swap rather than a rewrite.
+
+**Persistence and deployment**
+
+- **The seam held.** Milestone 1 put every storage call behind `PaperStore` and
+  promised that swapping in Postgres would change no router. It changed none.
+- **The interface stayed synchronous, on purpose.** Moving pdfplumber off the
+  event loop was about work that blocked for seconds. These are single-row
+  lookups that take well under a millisecond against a local database; making
+  the seam async would have meant editing every router to honour a principle
+  that doesn't apply.
+- **One suite, three stores.** `tests/test_store_contract.py` runs identical
+  tests against the in-memory store, SQLite and a real Postgres. On its first
+  run it caught a bug in the *in-memory* store — pages came back in insertion
+  order, and had since milestone 1, only ever looking right because pdfplumber
+  emits them in order.
+- **Order is stored, not assumed.** Concepts are ordered so prerequisites come
+  first. A list keeps that for free; a table has no order at all, so there is a
+  `position` column, and the test for it performs an `UPDATE` first — which
+  moves a row to the end of a Postgres heap, so a missing `ORDER BY` fails
+  rather than passing by coincidence.
+- **Migrations are held to the code.** There are two descriptions of the schema,
+  the tables the app queries and the migration that creates them. A test runs
+  `alembic upgrade head` on an empty database and asks Alembic's autogenerate to
+  diff the result against the code; the only passing answer is an empty diff.
+- **A containerised backend cannot bind-mount its own paths.** It hands render
+  containers files with `docker run -v`, but under compose the paths it knows
+  are inside *its* container, which the Docker daemon cannot see. So storage is a
+  named volume, and each sandbox mounts only its own scratch directory with
+  `volume-subpath` — never the uploads, never another render.
+- **Widen the directory, never raise the sandbox's privileges.** The render
+  image runs as uid 1000 and the backend as root, so a root-owned scratch
+  directory was read-only to manim — `Permission denied: '/work/media'` on the
+  first render under compose. The tempting fix was running render containers as
+  root. That would run model-written code as root to dodge a `chmod`.
 
 **Talking to the model**
 
@@ -220,8 +281,7 @@ timeout → `504`, readable PDF that yields nothing → `422`.
 - **The LLM sits behind one method.** `LLMClient.structured(prompt, schema)` is
   the entire provider interface; prompts live with the feature that owns them.
 - **Retrying is not free when the quota counts requests.** Each model gets one
-  retry, then the client moves to the next model — a generous retry policy spends
-  the day's budget on a queue that is not moving.
+  retry, then the client moves to the next model.
 
 **Generating and rendering**
 
@@ -237,39 +297,34 @@ timeout → `504`, readable PDF that yields nothing → `422`.
   makes failure *fast*.
 - **The error message is the correction prompt.** `RenderError` carries stderr
   precisely so the next attempt can be "here is your code, here is what it did".
-  Correction runs at a lower temperature than generation.
 - **Infrastructure failure is not the model's fault.** A Docker error raises
   `RenderUnavailable` and stops the loop, instead of spending model calls asking
   the model to fix a bad mount.
 - **Failure degrades instead of erroring.** When every attempt fails, a
-  hand-written card renders instead and the response says `generated: false`. On
-  its first contact with reality that was the only thing that worked: the
-  provider refused every generation request and 6/6 concepts still returned a
-  playable video.
+  hand-written card renders instead and the response says `generated: false`.
 
 **Narration**
 
 - **The narrator is local.** Kokoro by default, Piper as a lighter option. The
   scarce resource is model requests per day, and spending them on a voice would
   be a bad trade. Local is also deterministic — the same text gives the same
-  audio, which a hosted API never does.
+  audio.
 - **Narration is synthesised before the animation is written.** The reverse order
-  produced 5.3s of video under 13.7s of speech, which meant holding a dead frame
-  for eight seconds. Padding is the safety net, not the plan.
-- **Pacing is a setting, and the text is a bigger one.** Sentence pauses and
-  delivery speed are configurable, but asking the model for short single-idea
-  sentences did more for smoothness than any parameter — a synthesised voice
-  breathes at punctuation and nowhere else.
+  produced 5.3s of video under 13.7s of speech. Padding is the safety net, not
+  the plan.
+- **Pacing is a setting, and the text is a bigger one.** Asking the model for
+  short single-idea sentences did more for smoothness than any parameter — a
+  synthesised voice breathes at punctuation and nowhere else.
 
 **Jobs and the API boundary**
 
 - **Builds do not block the request.** A build is a split call plus up to three
   model calls and container starts *per scene* — minutes, on a connection no
   proxy would hold open.
-- **The job registry is in-process, deliberately.** A restart loses jobs and a
-  second worker would not see them. Redis plus a worker process is real
-  infrastructure and milestone 8 rewrites persistence anyway; the swap is one
-  class behind `JobRegistry`.
+- **The job registry is still in-process.** A restart loses a build in flight,
+  though not a finished video — those are in Postgres and the storage volume.
+  Now that Postgres exists, persisting jobs is one class behind `JobRegistry`;
+  it hasn't been needed yet.
 - **SSE, not a WebSocket.** Progress is one-way, needs no protocol upgrade, and
   browsers reconnect it for free. The stream replays a job's recorded events
   before live ones, so a late subscriber still sees the whole build.
@@ -285,15 +340,14 @@ timeout → `504`, readable PDF that yields nothing → `422`.
 - **Progress shows the stage, not a percentage.** The stages differ in length by
   an order of magnitude; "animating scene 2 of 3" says more than a bar stuck
   at 40%.
-- **One shader, several looks.** The landing background is ~150 lines of GLSL on
-  a single quad, with five variants behind `?bg=`. One still frame under
-  `prefers-reduced-motion`, paused while the tab is hidden.
+- **One shader, several looks.** The landing background is one quad of GLSL with
+  five variants behind `?bg=`. One still frame under `prefers-reduced-motion`,
+  paused while the tab is hidden.
 
 **Testing**
 
 - **Tests never touch the network.** `StubLLM`, `StubRenderer`, `StubSpeech` and
-  `StubMedia` are scripted per test, so the suite runs offline with no key and no
-  Docker.
+  `StubMedia` are scripted per test, so the suite runs offline with no key.
 - **But a stub also replaces the check that the real thing can be built.** 105
   tests once passed over a `deps.py` reading five settings that did not exist.
   `tests/test_deps.py` now constructs every provider from real `Settings`.

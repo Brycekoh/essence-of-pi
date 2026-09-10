@@ -19,7 +19,7 @@ from pathlib import Path
 
 from ..container import CONTAINER_WORKDIR, ContainerError, ContainerTimeout
 from ..container import build_argv as build_container_argv
-from ..container import container_name
+from ..container import container_name, make_scratch
 from ..container import run as run_container
 from .base import RenderError, RenderResult, RenderTimeout, RenderUnavailable
 
@@ -53,7 +53,7 @@ class ManimDockerRenderer:
         timeout: float,
     ) -> RenderResult:
         workdir = destination.parent / f".render-{container_name('')[1:]}"
-        workdir.mkdir(parents=True, exist_ok=True)
+        make_scratch(workdir)
         (workdir / "scene.py").write_text(code, encoding="utf-8")
 
         # Named so it can be killed on timeout. Killing the `docker run` client

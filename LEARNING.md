@@ -725,3 +725,98 @@ One bug worth remembering: a backtick inside a GLSL comment ended the
 JavaScript template literal early. TypeScript reported the error on a line
 that looked like perfectly good GLSL, because from its point of view the
 string had already closed.
+
+---
+
+## Milestone 8 — Persistence and deploy
+
+**Built:** Postgres behind `PaperStore`, Alembic migrations, and a
+`docker-compose.yml` that brings up Postgres, the migration, both sandbox
+images, the backend and a production frontend with one command.
+
+**Verified so far:** 159 tests, including the storage contract suite and the
+migration test against a real Postgres. The stack comes up in dependency order.
+Rendering, Kokoro narration and ffmpeg muxing all work from inside the
+containerised backend. A paper, its six concepts and its PDF survived the
+backend container being destroyed and recreated. The production frontend
+renders them from the containerised API with no console errors.
+
+**Things I learned**
+
+- **De-risk the hard part first, and it wasn't Postgres.** The backend hands
+  render containers their files with `docker run -v <path>`. Inside compose,
+  `<path>` is a path inside the *backend's* container, which the Docker daemon
+  cannot see -- every render would fail. The fix relied on `volume-subpath`,
+  which needs Docker 26 or later, so that got tested with two throwaway
+  containers before a line of code was written.
+- **The seam held.** Milestone 1 promised that swapping the store would change
+  no router. It changed none. `PaperStore` became a Protocol with two
+  implementations, and the ten methods stayed synchronous: these are
+  sub-millisecond lookups, and the "don't block the event loop" rule was always
+  about pdfplumber's eighteen seconds, not about this.
+- **One suite, three stores, and it paid on the first run.** The same tests run
+  against in-memory, SQLite and Postgres. The first failure was in the
+  *in-memory* store: pages came back in insertion order, and had since
+  milestone 1. It only ever looked right because pdfplumber emits pages in
+  order. A second implementation is what exposed the first one's assumption.
+- **A table has no order.** The list kept prerequisites-first for free; a table
+  needs a `position` column. The test for it does an `UPDATE` before reading,
+  because that moves a row to the end of a Postgres heap -- without it, a
+  missing `ORDER BY` passes by the coincidence of insertion order.
+- **SQLite ignores foreign keys unless every connection opts in**, so
+  `ON DELETE CASCADE` silently does nothing. The contract test re-saves a
+  deleted paper's id to prove no orphaned concept rows come back.
+- **Named volumes have real permissions.** The render image runs as uid 1000,
+  the backend as root. A root-owned scratch directory is read-only to uid 1000,
+  and manim's first render under compose died with
+  `Permission denied: '/work/media'`. Host bind mounts on Docker Desktop had
+  hidden this for five milestones.
+- **Widen the directory; never raise the sandbox's privileges.** The one-line
+  fix was `--user 0` on render containers -- which runs model-written code as
+  root to avoid a `chmod`. The actual fix makes the scratch directory `0o777`,
+  set after `mkdir` because `mkdir`'s mode is filtered by umask.
+- **Reproduce at the smallest layer that shows the bug.** The failing render
+  surfaced as `manim exited with code 1` through three layers of backend code.
+  A plain `docker run` with the same mount, flags and a root-seeded directory
+  printed the real `PermissionError` in seconds, and also showed each image's
+  uid -- which explained why narration would have worked and muxing would not.
+- **Check the silent fallback explicitly.** With `DATABASE_URL` unset, the
+  backend quietly uses the in-memory store, and everything works until a
+  restart. So the first check under compose was which store class was actually
+  in use, not whether the API responded.
+- **The Docker socket is a trust boundary, so say so where it is created.** The
+  sandboxes stay sandboxed; the backend that starts them is root-equivalent on
+  the machine. That warning lives at the top of `docker-compose.yml` and in the
+  README, not in a footnote.
+- **Git Bash rewrites `/work` inside arguments.** A test command failed with a
+  bare usage hint until `MSYS_NO_PATHCONV=1`. The app calls Docker through
+  `subprocess` and never sees this; it is a harness artefact, and it is worth
+  knowing the difference before "fixing" the app.
+- **"Deploy" means compose on my own machine.** This is a personal tool on a
+  free tier. Railway and Vercel would have been infrastructure for its own sake.
+
+### The acceptance test
+
+Proved rather than asserted:
+
+- **A real video, built through the compose API.** Split, three scenes narrated,
+  scenes one and two animated together under the shared semaphore, scene three
+  once a slot freed, stitched: 216 seconds to build, 33.2 seconds of h264 and
+  aac. Slower than the 110-second demo clip, and not mysteriously -- the API
+  renders at 720p (`-qm`) while the measurement script defaults to 480p (`-ql`).
+- **Everything a user would lose, fingerprinted three times.** Paper count,
+  concept order, `video_url`, and the mp4's SHA-256 -- before, after
+  `docker compose restart backend`, and after a full `docker compose down` and
+  `up`. All three identical: 1,325,606 bytes, `sha256 eb319e6d19490f272211...`.
+  `down` left no containers and both volumes.
+
+**Fingerprint what the user would lose, not what the API returns.** A restart
+test that only checks for HTTP 200 passes against an empty database. Hashing the
+video bytes is what distinguishes "the backend came back" from "the work came
+back".
+
+**And a small one:** `frontend/.env.example` had never been committed.
+create-next-app's `.gitignore` swallows `.env*`, so the one file documenting
+`NEXT_PUBLIC_API_URL` -- which contains no secrets at all -- silently never
+reached the repo in milestone 7. It took auditing `git status --ignored` before
+committing to notice. A `!.env.example` negation fixes it.

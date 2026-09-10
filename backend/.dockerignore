@@ -1,0 +1,9 @@
+# Never bake a local virtualenv, generated media or secrets into an image.
+.venv
+storage
+.env
+__pycache__
+*.pyc
+.pytest_cache
+tests
+scripts

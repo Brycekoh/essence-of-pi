@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     # Where uploaded PDFs are written. Relative paths resolve against backend/.
     upload_dir: Path = BACKEND_ROOT / "storage" / "uploads"
 
+    # --- Persistence (milestone 8) ---
+    # Unset means the in-memory store: a fresh clone still runs with no
+    # database, and loses everything on restart. Set it and papers, pages and
+    # concepts survive. docker-compose.yml sets it for you.
+    #   postgresql+psycopg://eop:eop@localhost:5432/essence_of_pi
+    database_url: str | None = None
+
     # Reject anything larger before we bother reading it. 25 MB.
     max_upload_bytes: int = 25 * 1024 * 1024
 

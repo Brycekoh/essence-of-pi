@@ -1,12 +1,107 @@
+# The whole of Essence of Pi, one command:
+#
+#   docker compose up --build
+#
+# Then http://localhost:3000. Put GEMINI_API_KEY in backend/.env first.
+#
+# The first build takes a while: two ~3 GB images for rendering and narration.
+# After that, `docker compose up` starts in seconds.
+#
+# Security note, stated plainly: the backend mounts the Docker socket so it can
+# start render containers. That gives the backend root-equivalent control of
+# Docker on this machine. The containers it starts are still sandboxed --
+# no network, capped memory and CPU, and each sees only its own scratch
+# directory -- but the backend itself is trusted. Fine for personal use on your
+# own machine; do not expose port 8000 to a network you do not control.
+
+name: essence-of-pi
+
 services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: eop
+      POSTGRES_PASSWORD: eop
+      POSTGRES_DB: essence_of_pi
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eop -d essence_of_pi"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Build-only. The backend starts these images itself with `docker run`;
+  # they are declared here so `docker compose up --build` builds them. Each
+  # exits immediately, and the backend waits for that before starting.
+  render-image:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.render
+    image: essence-of-pi/render:latest
+    entrypoint: ["true"]
+    restart: "no"
+
+  tts-image:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.kokoro
+    image: essence-of-pi/tts:kokoro
+    entrypoint: ["true"]
+    restart: "no"
+
+  # Applies migrations, then exits. The backend only starts once this succeeds,
+  # so it never serves against a schema older than its code.
+  migrate:
+    build: ./backend
+    image: essence-of-pi/backend:latest
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://eop:eop@db:5432/essence_of_pi
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
   backend:
     build: ./backend
+    image: essence-of-pi/backend:latest
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://eop:eop@db:5432/essence_of_pi
+      ALLOWED_ORIGINS: http://localhost:3000
+      # Tells the backend to hand sandboxes sub-directories of this volume
+      # rather than bind-mount paths the daemon cannot see.
+      STORAGE_VOLUME: essence-of-pi-storage
+      STORAGE_ROOT: /data
+    volumes:
+      - storage:/data
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8000:8000"
-    environment:
-      ALLOWED_ORIGINS: http://localhost:3000
-    volumes:
-      # Live reload while developing, and uploads that survive a rebuild.
-      - ./backend/app:/app/app
-      - ./backend/storage:/app/storage
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      render-image:
+        condition: service_completed_successfully
+      tts-image:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  db:
+  storage:
+    # A fixed name, because the backend passes it to `docker run --mount`.
+    # Compose would otherwise prefix it with the project name.
+    name: essence-of-pi-storage

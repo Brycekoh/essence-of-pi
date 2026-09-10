@@ -1,149 +1,115 @@
 # Architecture
 
-The shape of the finished system, and how much of it exists so far.
+How Essence of Pi fits together, as of milestone 8. The *why* behind each
+decision is in [README.md](README.md#design-notes) and, with the mistakes left
+in, [LEARNING.md](LEARNING.md).
+
+## The stack under docker compose
 
 ```
-                        ┌───────────────┐
-   PDF ──upload──▶      │  ingestion    │   ← milestone 1 (DONE)
-                        │  validate     │
-                        │  extract text │
-                        └───────┬───────┘
-                                │ text
-                        ┌───────▼───────┐
-                        │  concepts     │   ← milestone 2 (DONE)
-                        │  LLM, struct- │
-                        │  ured output  │
-                        └───────┬───────┘
-                                │ concept
-                        ┌───────▼───────┐
-                        │  animation    │   ← milestone 4 (DONE)
-                        └───────┬───────┘
-                                │ scenes
-              ┌─────────────────┼─────────────────┐
-              │                 │                 │
-      ┌───────▼──────┐  ┌───────▼──────┐  ┌───────▼──────┐
-      │ generate     │  │ narrate      │  │ ...          │  ← milestone 5
-      │ Manim code   │  │ (TTS)        │  │              │
-      │      │       │  └───────┬──────┘  └──────────────┘
-      │   render     │          │
-      │      │       │          │
-      │  fail? feed  │          │
-      │  stderr back │          │
-      │  and retry   │          │
-      └───────┬──────┘          │
-              └────────┬────────┘
-                       │ mux + concat (ffmpeg)
-               ┌───────▼───────┐
-               │  final video  │   ← milestone 6 adds queue + progress
-               └───────┬───────┘
-                       │
-               ┌───────▼───────┐
-               │  Next.js UI   │   ← milestone 7
-               └───────────────┘
+  browser ─────► frontend        Next.js production build          :3000
+     │
+     └─────────► backend         FastAPI, one worker               :8000
+                    │    │
+                    │    └─────► db            Postgres 17
+                    │
+                    │  /var/run/docker.sock
+                    ▼
+               host Docker daemon
+                    │
+                    ├─► essence-of-pi/render      manim, ffmpeg, Piper   uid 1000
+                    └─► essence-of-pi/tts:kokoro  Kokoro                 root
+                          sandboxes: --network none, capped memory and CPU,
+                          each mounting only its own scratch directory
 ```
 
-## Milestones 1-4, as built
+**Volumes.** `db` holds Postgres. `essence-of-pi-storage` is mounted into the
+backend at `/data` and holds uploads, rendered videos and per-job scratch
+directories.
+
+**Startup order**, enforced by `depends_on`:
+
+```
+db healthy ──► migrate (alembic upgrade head) exits 0 ─┐
+render-image exits 0 ──────────────────────────────────┼──► backend ──► frontend
+tts-image exits 0 ─────────────────────────────────────┘
+```
+
+`render-image` and `tts-image` exist only so `docker compose up --build` builds
+those images; the backend starts them itself with `docker run`.
+
+## A video build, end to end
+
+1. `POST /api/papers/{id}/concepts/{cid}/video` returns `202` with a job, or
+   `200` with the job already running for that concept.
+2. `JobRegistry` runs `build_explainer` as an asyncio task. Progress events fan
+   out to any `GET /api/jobs/{id}/events` subscribers, which replay history
+   first.
+3. The model splits the concept into scenes.
+4. Every scene's narration is synthesised concurrently, then **measured**.
+5. Scenes animate in parallel under one global semaphore. For each: the model
+   writes Manim to fit the measured length → AST check → render in a sandbox →
+   on failure, the distilled stderr becomes the next prompt, up to three tries →
+   title card if all fail.
+6. Each clip is muxed with its narration, the clips are concatenated, and the mp4
+   lands in the storage volume. `video_url` is written to Postgres.
+
+## How a sandbox gets its files
+
+| Where the backend runs | Mount | Why |
+| --- | --- | --- |
+| On the host | `-v <absolute path>:/work` | The path is the daemon's own |
+| Under compose | `--mount type=volume,src=essence-of-pi-storage,dst=/work,volume-subpath=<scratch dir>` | The backend's paths are inside its container, invisible to the daemon |
+
+`STORAGE_VOLUME` and `STORAGE_ROOT` select compose mode. A sandbox is refused a
+mount of the whole volume, or of anything outside it. Scratch directories are
+created `0o777` because the sandboxes do not share a uid with the backend.
+
+## Backend layout
 
 ```
 backend/
 ├── app/
-│   ├── main.py              FastAPI app, CORS, router wiring
-│   ├── config.py            pydantic-settings; one cached Settings instance
-│   ├── api/
-│   │   ├── papers.py        the six paper routes
-│   │   ├── concepts.py      extract / list / read concepts
-│   │   └── videos.py        render a concept, stream the mp4
-│   ├── models/
-│   │   ├── paper.py         Paper, PageText, PaperText
-│   │   └── concept.py       ConceptDraft (the LLM's schema) vs Concept (stored)
+│   ├── main.py, config.py
+│   ├── api/            papers, concepts, videos, jobs, deps (every provider)
+│   ├── models/         paper, concept, scene, job — the wire contract
+│   ├── scenes/         title_card — the hand-written fallback scene
 │   └── services/
-│       ├── pdf_parser.py    pdfplumber, run off the event loop
-│       ├── concepts.py      owns the prompt and the post-validation
-│       ├── store.py         PaperStore — the seam Postgres slots into later
-│       ├── animation.py  the generate-check-render-correct loop
-│       ├── codecheck.py  AST checks: fast feedback, NOT the sandbox
-│       ├── llm/
-│       │   ├── base.py      LLMClient protocol — one method, `structured`
-│       │   ├── gemini.py    response_schema + retry with backoff
-│       │   └── stub.py      scripted double; tests never hit the network
-│       └── render/
-│           ├── base.py      Renderer protocol; RenderError carries stderr
-│           ├── manim_docker.py  sandboxed container run, killed on timeout
-│           └── stub.py      writes a placeholder mp4, no Docker needed
-│   └── scenes/
-│       └── title_card.py    the hand-written scene, replaced in milestone 4
-└── tests/
-    ├── pdf_fixture.py       hand-written PDF generator, no binary fixtures
-    ├── test_papers.py       the ingestion API
-    ├── test_concepts.py     the extraction API and service
-    ├── test_llm_gemini.py   schema compatibility, config errors, caching
-    ├── test_video.py        render API, scene generation, sandbox flags
-    └── test_animation.py    the correction loop and the static checks
+│       ├── pdf_parser.py   pdfplumber, off the event loop
+│       ├── concepts.py     extraction prompt and meaning checks
+│       ├── explainer.py    split → narrate → measure → animate → mux → concat
+│       ├── animation.py    generate → check → render → correct loop
+│       ├── codecheck.py    AST checks: fast failure, not a defence
+│       ├── jobs.py         in-process registry and SSE fan-out
+│       ├── store.py        PaperStore protocol, in-memory implementation
+│       ├── sql_store.py    Postgres implementation and table definitions
+│       ├── container.py    sandbox argv, mounts, scratch dirs, timeouts
+│       ├── llm/            Gemini client with model rotation; stub
+│       ├── render/         manim in Docker; stub
+│       ├── media/          ffmpeg in Docker; stub
+│       └── speech/         Kokoro, Piper, gTTS; stub
+├── alembic/            env.py, versions/0001_initial.py
+├── scripts/            measure_generation.py
+├── tests/              159 tests; contract suite runs on memory, SQLite, Postgres
+├── Dockerfile          API server, with the docker CLI
+├── Dockerfile.render   manim + LaTeX + ffmpeg + Piper
+└── Dockerfile.kokoro   Kokoro on CPU-only torch
 ```
 
-**Request path for an upload**
+## The seams
 
-1. `POST /api/papers` receives the file into memory.
-2. Reject empty → 400. Over the size limit → 413. Missing `%PDF-` → 415.
-3. Write the bytes to `storage/uploads/{uuid}.pdf`.
-4. `extract_pages()` hands pdfplumber to a worker thread; a parse failure
-   deletes the orphaned file and returns 422.
-5. Build a `Paper`, store it alongside its pages, return 201.
+Every collaborator that could plausibly change sits behind one small interface,
+and every one has a stub so the suite runs offline.
 
-**Request path for a concept extraction**
+| Seam | Contract | Implementations |
+| --- | --- | --- |
+| `PaperStore` | ten synchronous methods | in-memory, SQL (SQLite in tests, Postgres in compose) |
+| `LLMClient` | `structured(prompt, schema)` | Gemini with model rotation, stub |
+| `Renderer` | `render(code, scene_name, destination, timeout)` | manim in Docker, stub |
+| `Speech` | `say(text, destination)` | Kokoro, Piper, gTTS, stub |
+| `MediaTool` | `duration`, `mux`, `concat` | ffmpeg in Docker, stub |
+| `JobRegistry` | create, submit, publish, subscribe | in-process only |
 
-1. `POST /api/papers/{id}/concepts` resolves the paper and its pages, or 404s.
-2. `build_document()` joins non-blank pages with `[page N]` markers up to a
-   character budget, reporting whether it had to truncate.
-3. `LLMClient.structured(prompt, schema=ConceptExtraction)` — the SDK decodes
-   directly into the pydantic model; transient server errors retry with
-   backoff, bad requests do not.
-4. `_clean()` drops out-of-range page citations, self-referential
-   prerequisites, and duplicate names, then the list is trimmed to
-   `max_concepts`.
-5. Concepts get server-assigned ids, are stored against the paper, returned 201.
-
-Failures map to status codes deliberately: no API key → 503, upstream failure →
-502, readable PDF that yields nothing → 422.
-
-**Request path for a render**
-
-1. `POST .../concepts/{cid}/video` resolves the concept, or 404s.
-2. `build_scene()` produces Manim source, embedding concept text via `repr()`
-   so it can only ever be data.
-3. The source is written to a scratch directory, which is bind-mounted into a
-   container run with `--network none`, `--memory`, `--cpus` and a name.
-4. On timeout the container is killed by name — killing the `docker run`
-   client would leave it running.
-5. The mp4 is located by glob (the resolution directory depends on the quality
-   flag), moved to `storage/videos/{concept_id}.mp4`, and the URL is attached
-   to the concept.
-
-Failures map deliberately: render failure → 502, timeout → 504, daemon down →
-502 with instructions. Captured stderr is never returned to the client; it
-names host paths, and from milestone 4 it becomes the correction prompt.
-
-**The correction loop (milestone 4)**
-
-```
-   ask the model for a scene  ──▶  compile() + AST check  ──▶  render in Docker
-             ▲                            │                          │
-             │                            │ rejected                 │ failed
-             └──── distilled error ◀──────┴──────────────────────────┘
-                    (max 3 attempts, then the milestone-3 card)
-```
-
-The static check exists to fail in microseconds instead of seconds; the
-container exists to fail *safely*. They are not the same mechanism and the code
-says so.
-
-**The three load-bearing seams**
-
-- `PaperStore` — everything touching persistence goes through it. Swapping it
-  for Postgres in milestone 8 should not require editing any router.
-- `LLMClient` — one method, `structured(prompt, schema) -> schema`. Every later
-  model call (scene splitting, Manim generation, narration) is that same shape,
-  so the provider stays swappable and every test stays offline.
-- `Renderer` — one method, `render(code, scene_name, destination, timeout)`.
-  Milestone 3 feeds it code we wrote; milestone 4 feeds it code a model wrote.
-  Nothing else changes, which is the point of building it now.
+`JobRegistry` is the one still in memory: a restart loses a build in flight, but
+not a finished video. It is the next seam to move into Postgres if that ever
+matters.
