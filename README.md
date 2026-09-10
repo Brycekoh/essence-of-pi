@@ -5,11 +5,25 @@ Research papers, distilled into 3blue1brown-style explainers.
 Upload a paper, get back the handful of ideas that actually matter, and turn any
 of them into a short narrated animation.
 
-> **Status: all eight milestones done.** `docker compose up --build` brings up
-> the whole thing — Postgres, the backend, the frontend and both sandbox images
-> — and papers, concepts and videos survive restarts. This is a learning build,
-> in public, one milestone per commit; [LEARNING.md](LEARNING.md) is the running
-> log, including the mistakes.
+> **Status: complete — all eight milestones done.** `docker compose up --build`
+> brings up the whole thing, and papers, concepts and videos survive restarts.
+> This is a learning build, in public, one milestone per commit;
+> [LEARNING.md](LEARNING.md) is the running log, mistakes included.
+
+**Contents** —
+[Demo](#demo) ·
+[How it works](#how-it-works) ·
+[Tech stack](#tech-stack) ·
+[Prerequisites](#prerequisites) ·
+[Run it](#run-it) ·
+[Configuration](#configuration) ·
+[Free tier](#free-tier-reality-check) ·
+[API](#api) ·
+[Project structure](#project-structure) ·
+[Troubleshooting](#troubleshooting) ·
+[Known limitations](#known-limitations) ·
+[Roadmap](#roadmap) ·
+[Design notes](#design-notes)
 
 ## Demo
 
@@ -25,6 +39,17 @@ Generated from [Batch Normalization](https://arxiv.org/abs/1502.03167) (11 pages
 with no human input beyond dropping the PDF in: the model chose the concept,
 split it into three scenes, wrote the narration, wrote the Manim, and all three
 scenes rendered on the first attempt. 38 seconds of video, 110 seconds to build.
+
+### The app
+
+<p align="center">
+  <img src="media/app-landing.png" alt="The landing page: a glowing ring behind the upload panel" width="49%">
+  <img src="media/app-paper.png" alt="A paper's concepts, with a built video playing inline" width="49%">
+</p>
+
+Drop a PDF on the landing page, extract its concepts, and press **Build video** on
+any of them. Progress streams in stage by stage, and the finished video plays
+inline.
 
 ## How it works
 
@@ -53,22 +78,44 @@ in Postgres; PDFs and videos live in a Docker volume.
 
 **159 tests**, including one suite run against three storage implementations.
 
+## Tech stack
+
+| Layer | What |
+| --- | --- |
+| Backend | Python, FastAPI, pydantic, SQLAlchemy 2, Alembic, pdfplumber |
+| Database | Postgres 17 (in-memory store when no database is configured) |
+| Model | Google Gemini on the free tier, via structured output |
+| Animation | Manim Community 0.21 with LaTeX, in a Docker sandbox |
+| Narration | Kokoro by default; Piper and gTTS as alternatives |
+| Media | ffmpeg, in the same sandbox |
+| Frontend | Next.js 16, React 19, Tailwind CSS 4, hand-written WebGL |
+| Deployment | Docker Compose, on your own machine |
+
+## Prerequisites
+
+- **Docker Desktop**, or Docker Engine **26 or later** with Compose **2.24 or
+  later**. The sandbox mounts need `volume-subpath` (Engine 26); the optional
+  `.env` file needs Compose 2.24.
+- **About 10 GB of free disk** for images. Build cache can take more;
+  `docker builder prune` reclaims it.
+- **A free Gemini API key** from [AI Studio](https://aistudio.google.com/apikey).
+- For development on the host only: **Python 3.12+** and **Node.js 20.9+**.
+
 ## Run it
 
 ### With docker compose
 
 ```bash
-cp backend/.env.example backend/.env    # then add GEMINI_API_KEY
+cp backend/.env.example backend/.env    # then set GEMINI_API_KEY in it
 docker compose up --build
 ```
 
-Then <http://localhost:3000>. A free Gemini key comes from
-[AI Studio](https://aistudio.google.com/apikey).
+Then open <http://localhost:3000>.
 
 The first build takes a while — the render and narration images are ~3 GB each.
 After that `docker compose up` starts in seconds, in dependency order: Postgres
 becomes healthy, migrations run and exit, both sandbox images are confirmed, and
-only then does the backend start.
+only then do the backend and frontend start.
 
 Your data lives in two volumes. `docker compose down` keeps them;
 `docker compose down -v` deletes every paper and video.
@@ -137,26 +184,22 @@ npm install
 npm run dev
 ```
 
-Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local` if the backend isn't on
-`localhost:8000`. The landing background switches with `?bg=` — `ring`
-(default), `glass`, `chrome`, `smoke`, `horizon`.
-
 ### Tests
 
 ```bash
 cd backend && pytest
 ```
 
-The storage contract suite and the migration tests also run against a real
-Postgres when one is listening on `TEST_DATABASE_URL` (default
-`localhost:55432`), and skip that leg otherwise:
+On Windows: `.\.venv\Scripts\pytest.exe`. The storage contract suite and the
+migration tests also run against a real Postgres when one is listening on
+`TEST_DATABASE_URL` (default `localhost:55432`), and skip that leg otherwise:
 
 ```bash
 docker run -d --name eop-pg-test -e POSTGRES_USER=eop -e POSTGRES_PASSWORD=eop \
   -e POSTGRES_DB=eop_test -p 55432:5432 postgres:17-alpine
 ```
 
-A few tests run manim, ffmpeg and Kokoro for real and skip themselves when
+A few tests run manim, ffmpeg and Kokoro for real, and skip themselves when
 Docker or an image is missing.
 
 ### Measuring the generation loop
@@ -169,17 +212,44 @@ cd backend
 .venv/Scripts/python.exe scripts/measure_generation.py path/to/paper.pdf --concepts 2
 ```
 
+## Configuration
+
+The backend reads environment variables, or `backend/.env`.
+[`backend/.env.example`](backend/.env.example) lists every setting with its
+default; only `GEMINI_API_KEY` is required. The ones you are most likely to want:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | — | Required for concepts and videos. Without it those routes return `503`. |
+| `MAX_SCENES` | `3` | Scenes per concept — the main lever on quota use |
+| `MAX_CONCEPTS` | `6` | Concepts extracted per paper |
+| `RENDER_QUALITY` | `-qm` | `-ql` 480p and fast, `-qm` 720p, `-qh` 1080p and slow |
+| `MAX_PARALLEL_RENDERS` | `2` | Scenes rendering at once, across every job |
+| `SPEECH_ENGINE` | `kokoro` | `kokoro`, `piper` (lighter), or `gtts` (needs network) |
+| `KOKORO_VOICE` | `af_bella` | Also `af_heart`, `af_nicole`, `am_michael`, `am_adam`, `bf_emma` |
+| `KOKORO_SPEED` | `0.92` | Below 1.0 is slower |
+| `LLM_MODEL` | `gemini-3.8-flash` | Pinned rather than an alias, so results are comparable |
+| `LLM_FALLBACK_MODELS` | `gemini-3.7-flash,…` | Tried in order when a model is busy or out of quota |
+| `DATABASE_URL` | unset | Unset means in-memory. Compose sets it for you. |
+| `MAX_UPLOAD_BYTES` | `26214400` | 25 MB |
+
+The frontend has one setting, `NEXT_PUBLIC_API_URL` (default
+`http://localhost:8000`). It is baked into the bundle at build time, so changing
+it means rebuilding the frontend.
+
 ## Free-tier reality check
 
 Gemini's free tier allows **20 requests per day, per model**. Concept extraction
 costs one; a video costs one to three *per scene*. The client rotates through
 `LLM_FALLBACK_MODELS` rather than retrying one model, since the quota is
-per-model, and remembers which models returned `429`.
+per-model, and remembers which models returned `429`. In practice that is
+roughly ten to twenty videos a day.
 
-`MAX_SCENES` is the main lever on how fast that budget disappears. Narration,
-rendering and storage cost nothing — they are local.
+Narration, rendering and storage cost nothing — they are local.
 
 ## API
+
+Interactive docs at <http://localhost:8000/docs>.
 
 | Method | Route | Does |
 | --- | --- | --- |
@@ -202,6 +272,70 @@ rendering and storage cost nothing — they are local.
 Failures map deliberately: no API key → `503`, upstream refusal → `502`, render
 timeout → `504`, readable PDF that yields nothing → `422`.
 
+## Project structure
+
+```
+essence-of-pi/
+├── backend/            FastAPI app, Alembic migrations, tests, three Dockerfiles
+├── frontend/           Next.js app and its Dockerfile
+├── media/              demo clip and screenshots for this README
+├── docker-compose.yml  the whole stack
+├── ARCHITECTURE.md     how the pieces fit, with diagrams
+└── LEARNING.md         the milestone-by-milestone log
+```
+
+[ARCHITECTURE.md](ARCHITECTURE.md) has the full backend layout, the request path
+for a video build, and a table of every seam and its implementations.
+
+## Troubleshooting
+
+**Every video fails, or the API says the Docker daemon is not running.** Start
+Docker Desktop and confirm with `docker info`. Rendering, narration and muxing
+all need it.
+
+**Docker Desktop won't start, mentioning `dockerInference`.** Its Model Runner
+failed to bind a socket. Turn off *Docker Model Runner* under Settings → AI, or
+run `wsl --shutdown`, delete `%LOCALAPPDATA%\Docker\run`, and start it again.
+
+**Concept extraction returns `503`.** `GEMINI_API_KEY` isn't set. Add it to
+`backend/.env`, then recreate the backend so it picks the file up:
+`docker compose up -d --force-recreate backend`.
+
+**"No model answered", or `429` errors.** The free tier's daily quota is spent
+on every model in the rotation. It resets daily (around midnight Pacific), or add
+more models to `LLM_FALLBACK_MODELS`.
+
+**The paper list is empty after a restart.** You're running on the host without
+`DATABASE_URL`, so the backend used the in-memory store. Set it and run
+`alembic upgrade head`. Under compose this can't happen.
+
+**`Permission denied: '/work/media'` in the backend logs.** An older backend
+image predates the scratch-directory fix. Rebuild: `docker compose up -d --build`.
+
+**A port is already in use.** Something else holds 3000 or 8000 — often the
+development servers. Stop them, or change the published ports in
+`docker-compose.yml`.
+
+**The frontend still calls an old API address.** `NEXT_PUBLIC_API_URL` is inlined
+at build time. Rebuild it: `docker compose up -d --build frontend`.
+
+**PowerShell reports a parse error on `&&`.** Windows PowerShell 5.1 has no `&&`.
+Run the commands separately, or join them with `;`.
+
+## Known limitations
+
+- **Single user, no authentication.** It's a personal tool; don't expose it.
+- **Builds in flight don't survive a restart.** The job registry lives in
+  memory. Finished videos are safe in Postgres and the storage volume.
+- **The correction loop only sees crashes.** A scene that renders cleanly but
+  looks wrong — overlapping text, say — passes. Catching that would need
+  something to look at the frames.
+- **Long papers are truncated.** Extraction reads the first 30,000 characters,
+  and says so in its response.
+- **No OCR.** Scanned or image-only pages extract as empty text.
+- **English only**, for both the prompts and the voices.
+- **Free-tier throughput.** Roughly ten to twenty videos a day.
+
 ## Roadmap
 
 - [x] **1 — Ingestion.** Upload, validate, extract text. No AI.
@@ -219,8 +353,7 @@ timeout → `504`, readable PDF that yields nothing → `422`.
       progress, watch clips inline.
 - [x] **8 — Persistence and deploy.** Postgres behind `PaperStore` with Alembic
       migrations, and one `docker compose up` for the whole stack. "Deploy"
-      means your own machine, deliberately — this is a personal tool, not a
-      hosted service.
+      means your own machine, deliberately.
 
 ## Design notes
 
@@ -241,43 +374,36 @@ timeout → `504`, readable PDF that yields nothing → `422`.
   promised that swapping in Postgres would change no router. It changed none.
 - **The interface stayed synchronous, on purpose.** Moving pdfplumber off the
   event loop was about work that blocked for seconds. These are single-row
-  lookups that take well under a millisecond against a local database; making
-  the seam async would have meant editing every router to honour a principle
-  that doesn't apply.
+  lookups that take well under a millisecond against a local database.
 - **One suite, three stores.** `tests/test_store_contract.py` runs identical
   tests against the in-memory store, SQLite and a real Postgres. On its first
   run it caught a bug in the *in-memory* store — pages came back in insertion
-  order, and had since milestone 1, only ever looking right because pdfplumber
-  emits them in order.
+  order, and had since milestone 1.
 - **Order is stored, not assumed.** Concepts are ordered so prerequisites come
-  first. A list keeps that for free; a table has no order at all, so there is a
-  `position` column, and the test for it performs an `UPDATE` first — which
-  moves a row to the end of a Postgres heap, so a missing `ORDER BY` fails
-  rather than passing by coincidence.
-- **Migrations are held to the code.** There are two descriptions of the schema,
-  the tables the app queries and the migration that creates them. A test runs
-  `alembic upgrade head` on an empty database and asks Alembic's autogenerate to
-  diff the result against the code; the only passing answer is an empty diff.
-- **A containerised backend cannot bind-mount its own paths.** It hands render
-  containers files with `docker run -v`, but under compose the paths it knows
-  are inside *its* container, which the Docker daemon cannot see. So storage is a
-  named volume, and each sandbox mounts only its own scratch directory with
-  `volume-subpath` — never the uploads, never another render.
+  first. A table has no order, so there is a `position` column, and its test
+  performs an `UPDATE` first — which moves a row to the end of a Postgres heap,
+  so a missing `ORDER BY` fails rather than passing by coincidence.
+- **Migrations are held to the code.** A test runs `alembic upgrade head` on an
+  empty database and asks Alembic's autogenerate to diff the result against the
+  code; the only passing answer is an empty diff.
+- **A containerised backend cannot bind-mount its own paths.** Under compose,
+  the paths the backend knows are inside *its* container, which the Docker
+  daemon cannot see. Storage is a named volume, and each sandbox mounts only its
+  own scratch directory with `volume-subpath`.
 - **Widen the directory, never raise the sandbox's privileges.** The render
   image runs as uid 1000 and the backend as root, so a root-owned scratch
-  directory was read-only to manim — `Permission denied: '/work/media'` on the
-  first render under compose. The tempting fix was running render containers as
-  root. That would run model-written code as root to dodge a `chmod`.
+  directory was read-only to manim. The tempting fix was running render
+  containers as root — that would run model-written code as root to dodge a
+  `chmod`.
 
 **Talking to the model**
 
 - **The model is constrained, not asked nicely.** `response_schema` makes the SDK
-  decode straight into a pydantic model, so there is no "reply in JSON"
-  instruction anywhere, no markdown fence to strip, and no regex to recover from
-  a chatty answer.
+  decode straight into a pydantic model — no "reply in JSON" instruction, no
+  markdown fence to strip, no regex to recover from a chatty answer.
 - **A schema guarantees shape, not sense.** The model can still cite page 99 of a
-  12-page paper or list a concept as its own prerequisite, so
-  `services/concepts.py` validates meaning after the SDK has validated form.
+  12-page paper, so `services/concepts.py` validates meaning after the SDK has
+  validated form.
 - **The LLM sits behind one method.** `LLMClient.structured(prompt, schema)` is
   the entire provider interface; prompts live with the feature that owns them.
 - **Retrying is not free when the quota counts requests.** Each model gets one
@@ -286,73 +412,57 @@ timeout → `504`, readable PDF that yields nothing → `422`.
 **Generating and rendering**
 
 - **Rendering happens in a container, from the first render.** `--network none`,
-  a memory ceiling and a CPU quota, with a test asserting those flags. Milestone
-  3's code was ours and harmless; milestone 4's is written by a model, and by
-  then the sandbox already existed.
+  a memory ceiling and a CPU quota, with a test asserting those flags.
 - **Concept text enters generated Python as a literal, never an expression.**
   `repr()`, not interpolation — so a concept named `"); import os` is inert data.
-- **Static checks are a feedback loop, not a defence.** `compile()` plus an AST
-  pass rejects unrenderable code in microseconds instead of paying for a
-  container start. The container is what makes bad code *safe*; the AST pass only
-  makes failure *fast*.
+- **Static checks are a feedback loop, not a defence.** An AST pass rejects
+  unrenderable code in microseconds; the container is what makes bad code
+  *safe*.
 - **The error message is the correction prompt.** `RenderError` carries stderr
-  precisely so the next attempt can be "here is your code, here is what it did".
+  so the next attempt can be "here is your code, here is what it did".
 - **Infrastructure failure is not the model's fault.** A Docker error raises
-  `RenderUnavailable` and stops the loop, instead of spending model calls asking
-  the model to fix a bad mount.
+  `RenderUnavailable` and stops the loop, instead of spending model calls on a
+  bad mount.
 - **Failure degrades instead of erroring.** When every attempt fails, a
-  hand-written card renders instead and the response says `generated: false`.
+  hand-written card renders and the response says `generated: false`.
 
 **Narration**
 
-- **The narrator is local.** Kokoro by default, Piper as a lighter option. The
-  scarce resource is model requests per day, and spending them on a voice would
-  be a bad trade. Local is also deterministic — the same text gives the same
-  audio.
+- **The narrator is local.** Model requests are the scarce resource, and
+  spending them on a voice would be a bad trade. Local is also deterministic.
 - **Narration is synthesised before the animation is written.** The reverse order
-  produced 5.3s of video under 13.7s of speech. Padding is the safety net, not
-  the plan.
-- **Pacing is a setting, and the text is a bigger one.** Asking the model for
-  short single-idea sentences did more for smoothness than any parameter — a
-  synthesised voice breathes at punctuation and nowhere else.
+  produced 5.3s of video under 13.7s of speech.
+- **Pacing is a setting, and the text is a bigger one.** Short single-idea
+  sentences did more for smoothness than any parameter — a synthesised voice
+  breathes at punctuation and nowhere else.
 
 **Jobs and the API boundary**
 
-- **Builds do not block the request.** A build is a split call plus up to three
-  model calls and container starts *per scene* — minutes, on a connection no
-  proxy would hold open.
-- **The job registry is still in-process.** A restart loses a build in flight,
-  though not a finished video — those are in Postgres and the storage volume.
-  Now that Postgres exists, persisting jobs is one class behind `JobRegistry`;
-  it hasn't been needed yet.
+- **Builds do not block the request.** A build is minutes of model calls and
+  container starts, on a connection no proxy would hold open.
 - **SSE, not a WebSocket.** Progress is one-way, needs no protocol upgrade, and
-  browsers reconnect it for free. The stream replays a job's recorded events
-  before live ones, so a late subscriber still sees the whole build.
-- **Diagnostics stop at the API boundary.** Scene reports carry attempt
-  *outcomes*; the detail behind them is distilled renderer stderr, written for
-  the model and the server log, never for an HTTP client.
+  browsers reconnect it for free. The stream replays history before live events.
+- **Diagnostics stop at the API boundary.** Clients see attempt *outcomes*; the
+  renderer stderr behind them is for the model and the server log.
 
 **Frontend**
 
-- **Everything runs in the browser, on purpose.** The backend is local, already
-  allows the origin, and the progress stream is an `EventSource` — which only
-  exists in a browser.
-- **Progress shows the stage, not a percentage.** The stages differ in length by
-  an order of magnitude; "animating scene 2 of 3" says more than a bar stuck
-  at 40%.
-- **One shader, several looks.** The landing background is one quad of GLSL with
-  five variants behind `?bg=`. One still frame under `prefers-reduced-motion`,
-  paused while the tab is hidden.
+- **Everything runs in the browser, on purpose.** The backend is local, allows
+  the origin, and the progress stream is an `EventSource`.
+- **Progress shows the stage, not a percentage.** Stages differ in length by an
+  order of magnitude.
+- **Reduced motion means no waiting either.** Under `prefers-reduced-motion`,
+  animations are cut short *and* their delays cancelled, so content appears at
+  once instead of after a staggered entrance.
 
 **Testing**
 
-- **Tests never touch the network.** `StubLLM`, `StubRenderer`, `StubSpeech` and
-  `StubMedia` are scripted per test, so the suite runs offline with no key.
-- **But a stub also replaces the check that the real thing can be built.** 105
-  tests once passed over a `deps.py` reading five settings that did not exist.
-  `tests/test_deps.py` now constructs every provider from real `Settings`.
-- **Tests exist from commit one**, including a hand-rolled PDF writer in
-  `tests/pdf_fixture.py` so the suite needs no binary fixtures.
+- **Tests never touch the network.** Every external collaborator has a scripted
+  stub, so the suite runs offline with no key.
+- **But a stub also replaces the check that the real thing can be built.**
+  `tests/test_deps.py` constructs every provider from real `Settings`.
+- **Tests exist from commit one**, including a hand-rolled PDF writer so the
+  suite needs no binary fixtures.
 
 ## Note
 

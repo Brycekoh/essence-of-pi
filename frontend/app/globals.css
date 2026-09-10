@@ -144,6 +144,15 @@ body {
 
 video { background: #000; border-radius: 1rem; }
 
+/* Reduced motion must also cancel the *delays*. Shortening durations alone left
+   the landing page's staggered entrances waiting up to three seconds at
+   opacity 0 -- an empty page, for exactly the people who asked for less
+   motion, not more waiting. */
 @media (prefers-reduced-motion: reduce) {
-  * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  * {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

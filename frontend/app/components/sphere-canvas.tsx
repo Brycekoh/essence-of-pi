@@ -171,7 +171,21 @@ export function SphereCanvas({
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    const gl = canvas.getContext("webgl", { antialias: false, alpha: false });
+
+    // Read before the context exists: it decides whether the drawing buffer
+    // is preserved.
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    // Reduced motion paints one still frame and never animates, so that frame
+    // has to survive being presented. With the default preserveDrawingBuffer
+    // of false the browser may discard it -- a headless screenshot showed pure
+    // black where the ring should be. Animated mode repaints every frame and
+    // does not pay for the preserved buffer.
+    const gl = canvas.getContext("webgl", {
+      antialias: false,
+      alpha: false,
+      preserveDrawingBuffer: reduced,
+    });
     if (!gl) return;
 
     const compile = (type: number, src: string) => {
@@ -207,33 +221,40 @@ export function SphereCanvas({
     const uVariant = gl.getUniformLocation(program, "u_variant");
     gl.uniform1i(uVariant, VARIANT_INDEX[variant] ?? 0);
 
+    const start = performance.now();
+    let frame = 0;
+
+    const paint = () => {
+      const t = (performance.now() - start) / 1000;
+      gl.uniform1f(uTime, reduced ? 0 : t);
+      gl.uniform1f(uIntro, reduced ? 1 : Math.min(1, t / introSeconds));
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    };
+
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       canvas.width = Math.floor(window.innerWidth * dpr);
       canvas.height = Math.floor(window.innerHeight * dpr);
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.uniform2f(uRes, canvas.width, canvas.height);
+      // Resizing clears the canvas. The animation loop repaints on its next
+      // frame; with reduced motion there is no loop, so without this the
+      // background would stay black after the first resize.
+      if (reduced) paint();
     };
     resize();
     window.addEventListener("resize", resize);
 
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const start = performance.now();
-    let frame = 0;
-
-    const draw = () => {
-      const t = (performance.now() - start) / 1000;
-      gl.uniform1f(uTime, reduced ? 0 : t);
-      gl.uniform1f(uIntro, reduced ? 1 : Math.min(1, t / introSeconds));
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      if (!reduced && !document.hidden) frame = requestAnimationFrame(draw);
+    const loop = () => {
+      paint();
+      if (!document.hidden) frame = requestAnimationFrame(loop);
     };
     const onVisibility = () => {
       cancelAnimationFrame(frame);
-      if (!document.hidden) frame = requestAnimationFrame(draw);
+      if (!reduced && !document.hidden) frame = requestAnimationFrame(loop);
     };
     document.addEventListener("visibilitychange", onVisibility);
-    frame = requestAnimationFrame(draw);
+    if (!reduced) frame = requestAnimationFrame(loop);
 
     return () => {
       cancelAnimationFrame(frame);

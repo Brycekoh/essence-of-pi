@@ -820,3 +820,38 @@ create-next-app's `.gitignore` swallows `.env*`, so the one file documenting
 `NEXT_PUBLIC_API_URL` -- which contains no secrets at all -- silently never
 reached the repo in milestone 7. It took auditing `git status --ignored` before
 committing to notice. A `!.env.example` negation fixes it.
+
+### Finishing the README
+
+Writing a README that a stranger could follow meant checking the setup path a
+stranger would take, which turned up three bugs no test covered.
+
+- **The example config would have broken every video.** `backend/.env.example`
+  still pinned `RENDERER_IMAGE=manimcommunity/manim:stable` -- an image with no
+  ffmpeg -- and `MAX_CHARS_TO_MODEL=60000`, the value that drew repeated 503s.
+  The README tells you to copy that file, and compose loads it. My own `.env`
+  never had those lines, so nothing I ran ever failed. Now only
+  `GEMINI_API_KEY` is live and every default stays commented out. **An example
+  file with live values is a second copy of the defaults, and second copies
+  drift.**
+- **Compose's precedence had a hole.** `UPLOAD_DIR` and `VIDEOS_DIR` were set
+  only in the image's `ENV`, which `env_file` overrides -- so one line in `.env`
+  could move storage outside the volume, where no sandbox can see it. They are
+  pinned in compose's `environment` block now, which outranks both.
+- **Reduced motion was not reduced waiting.** The `prefers-reduced-motion` rule
+  shortened animation durations but kept their delays, so the landing page sat
+  empty for up to three seconds for exactly the people who asked for less
+  motion. It surfaced only because a headless screenshot captured the blank
+  page: headless browsers advance virtual time for scripts, not for CSS
+  animations.
+- **`msedge.exe` is a launcher stub.** It returns before the real browser has
+  written the screenshot, so checking for the file immediately reports a
+  failure that has not happened yet.
+- **Reduced motion also blanked the background.** With reduced motion the ring
+  shader paints one still frame and stops. But WebGL may discard a drawing
+  buffer that is not preserved once it has been shown, and any window resize
+  clears the canvas with no animation loop left to repaint it. The second
+  screenshot came back with the content restored and the ring gone. The buffer
+  is now preserved in reduced-motion mode, and resizing repaints. Two bugs
+  behind one media query, both visible only to people who asked their operating
+  system for less motion -- the users least likely to file a report.

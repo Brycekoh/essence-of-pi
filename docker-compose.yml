@@ -76,6 +76,11 @@ services:
       # rather than bind-mount paths the daemon cannot see.
       STORAGE_VOLUME: essence-of-pi-storage
       STORAGE_ROOT: /data
+      # Pinned here, not only in the image, because backend/.env is loaded
+      # too and would otherwise override them -- moving storage outside the
+      # volume, where no sandbox could see it.
+      UPLOAD_DIR: /data/uploads
+      VIDEOS_DIR: /data/videos
     volumes:
       - storage:/data
       - /var/run/docker.sock:/var/run/docker.sock
